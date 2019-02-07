@@ -31,6 +31,11 @@ Existing & planned components:
 * The OpenVario Lark device has to be in the first position in the device list
 * The Lark should connect at this point & monitoring shows NMEA sentences flowing from Lark
 
+## Building
+
+https://docs.espressif.com/projects/esp-idf/en/latest/get-started/index.html
+clone esp-idf
+
 ## Hardware
  * TBD
  * https://github.com/tmshlvck/lark-hw

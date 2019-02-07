@@ -18,15 +18,17 @@
  * along with Lark.  If not, see <http://www.gnu.org/licenses/>.
  */
 
-#ifndef VARIO_H_
-#define VARIO_H_
+#ifndef SENSOR_H_
+#define SENSOR_H_
 
-extern float vario_val;
-extern float dynamic_pressure;
-extern float static_pressure;
+#include <stdint.h>
 
-
-
-int sensor_read_init(void);
+typedef struct
+{
+    uint16_t header;
+    uint16_t time;
+    float press_mbar;
+    float temp_celsius;
+} press_temp_t;
 
 #endif

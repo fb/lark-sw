@@ -121,8 +121,7 @@ static esp_err_t ms5611_i2c_read(i2c_port_t i2c_num, uint8_t addr, uint8_t reg, 
 /* ms5611 driver */
 
 
-#define EXTRA_PRECISION      5 // trick to add more precision to the pressure and temp readings
-#define CONVERSION_TIME_MS   10 // conversion time in milliseconds. 10 is minimum
+#define EXTRA_PRECISION      4 // trick to add more precision to the pressure and temp readings
 #define PRESSURE_PER_TEMP 5 // Length of reading cycle: 1x temp, rest pressure. Good values: 1-10
 #define FIX_TEMP 25         // Fixed Temperature. ASL is a function of pressure and temperature, but as the temperature changes so much (blow a little towards the flie and watch it drop 5 degrees) it corrupts the ASL estimates.
                             // TLDR: Adjusting for temp changes does more harm than good.

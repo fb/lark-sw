@@ -30,22 +30,24 @@
 #include "freertos/queue.h"
 #include "driver/i2c.h"
 
-#include "esp_log.h"
 #include "esp_err.h"
 #include "nvs_flash.h"
 
 #include "sdkconfig.h"
 
+#include "audiovario.h"
 #include "ms5611.h"
 #include "net.h"
-#include "audiovario.h"
+#include "sensor.h"
 
+#define LOG_LOCAL_LEVEL ESP_LOG_VERBOSE
+#include "esp_log.h"
 
 #define STACK_SIZE 4096
 #define TAG "lark-vario: "
 
 
-#define I2C_SCL 22
+#define I2C_SCL 18
 #define I2C_SDA 21
 #define I2C_MASTER_TX_BUF_DISABLE  0
 #define I2C_MASTER_RX_BUF_DISABLE  0
@@ -137,86 +139,55 @@ static void KalmanFilter1d_reset(t_kalmanfilter1d* filter)
 	filter->var_x_accel_ = 0.0;
 }
 
-
+press_temp_t tep_sensor;
 
 void sensor_read_round(ms5611_drv_t *tep_dev, ms5611_drv_t *dp_dev, ms5611_drv_t *sp_dev) {
-	static int stage = 1;
+	static int stage = 0;
 
 	static int32_t rawpress = 0;
 	static int32_t rawtemp = 0;
-	float tep_read;
-	float dp_read;
-	float sp_read;
-	float temp;
+
+    tep_sensor.header = 0x5555;
+    tep_sensor.time = (uint16_t)esp_timer_get_time();
 
 	switch (stage) {
-		case 1:
-                case 5:
-                case 9:
-                case 13:
-                case 17:
-                case 21:
-                case 25:
-                case 29:
-                case 33:
-                case 37:
-			ms5611_start_conv_press(tep_dev);
-			// TODO: start conv sp_dev and dp_dev
-			break;
-		case 2:
-                case 6:
-                case 10:
-                case 14:
-                case 18:
-                case 22:
-                case 26:
-                case 30:
-                case 34:
-                case 38:
+		case 0: // at t = 0
 			/* TEK pressure */
 			rawpress = ms5611_get_conv(tep_dev);
-			tep_read = ms5611_get_pressure(tep_dev, rawpress, rawtemp);
-			ESP_LOGD(TAG, "read tep: %f (%fm)\n", tep_read, ms5611_calc_altitude(tep_read));
 
-			// check tep_pressure input value for validity
-			if ((tep_read < 100) || (tep_read > 1200)) {
-				/* TEK pressure out of range */
-				ESP_LOGW(TAG, "%s warn tep out of range\n", __func__);
-			} else {
-				KalmanFiler1d_update(&vkf, tep_read, 0.25, 0.05);
-			}
+            ms5611_start_conv_temp(tep_dev);
 
-			/* Total pressure + low-pass */
-			// TODO: Read
-			dp_read = 0;
-			dynamic_pressure = (3*dynamic_pressure + dp_read)/4;
+			/* TEK pressure out of range
+        	if ((tep_read < 100) || (tep_read > 1200)) {
+				ESP_LOGW(TAG, "%s warn tep out of range", __func__);
+                break;
+            }
 
-			/* mask speeds < 10km/h */
-			if (dynamic_pressure < 0.04) {
-				dynamic_pressure = 0.0;
-			}
+            KalmanFiler1d_update(&vkf, tep_read, 0.25, 0.05);
+			*/
 
-			/* Static pressure + low-pass */
-			// TODO: Read
-			sp_read = 0;
-			static_pressure = (3*static_pressure + sp_read)/4;
+            /* Start temp measurement */
 			break;
-		case 3:
-                        /* Start temp measurement */
-                        ms5611_start_conv_temp(tep_dev);
-                        break;
-                case 4:
-                        /* read temp values */
-			rawtemp = ms5611_get_conv(tep_dev);
-			temp = ms5611_get_temp(tep_dev, rawtemp);
-			ESP_LOGD(TAG, "%s temp=%f\n", __func__, temp);
-                        break;
-                default:
-                        break;
+        case 1: // at t = 12.5 ms
+            /* read temp values */
+        	rawtemp = ms5611_get_conv(tep_dev);
+
+        	/* start press */
+        	ms5611_start_conv_press(tep_dev);
+
+        	// convert / display
+            tep_sensor.press_mbar = ms5611_get_pressure(tep_dev, rawpress, rawtemp);
+            tep_sensor.temp_celsius = ms5611_get_temp(tep_dev, rawtemp);
+            ESP_LOGD(TAG, "tep: %d %d %2.2f %3.3f %5.2f", rawpress, rawtemp, tep_sensor.temp_celsius, tep_sensor.press_mbar, ms5611_calc_altitude(tep_sensor.press_mbar));
+			/* Unblock network -> feed data */
+			xSemaphoreGive(net_feed_semaphore);
+            break;
+		default:
+            break;
 	}
 
-	if (stage >= 40)
-		stage = 1;
+	if(stage == 2)
+		stage = 0;
 	else
 		stage++;
 }
@@ -281,7 +252,7 @@ static void sensor_read_task(void *pvParameter) {
 		if (xSemaphoreTake(timer_semaphore, portMAX_DELAY)!= pdTRUE)
 			ESP_LOGW(TAG, "semaphore failed!\n");
 		sensor_read_round(&tep_dev, &dp_dev, &sp_dev);
-		sensor_update_output();
+		//sensor_update_output();
 	}
 }
 
@@ -309,8 +280,13 @@ int sensor_read_init(void) {
 	KalmanFilter1d_reset(&vkf);
 	vkf.var_x_accel_ = 0.3; /* taken from openvario sensorsd.conf */
  
-	int ret = ms5611_init(&tep_dev, I2C_NUM_0, I2C_TEP_ADDR);
-	ESP_LOGD(TAG, "%s: ms5611 init: %d\n", __func__, ret);
+	int ret = -1;
+	while(ret != 0)
+	{
+		ret = ms5611_init(&tep_dev, I2C_NUM_0, I2C_TEP_ADDR);
+		ESP_LOGD(TAG, "%s: ms5611 init: %d\n", __func__, ret);
+		vTaskDelay(100 / portTICK_PERIOD_MS);
+	}
 
 	float tep_init = 0;
 	int sensor_test = 0;

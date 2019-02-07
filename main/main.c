@@ -52,21 +52,13 @@
 
 
 float vario_val_test_dir = 1;
-#define BLINK_GPIO 18
+#define BLINK_GPIO 5
 void debug_task(void *pvParameter)
 {
     //gpio_pad_select_gpio(BLINK_GPIO); //default?
     gpio_set_direction(BLINK_GPIO, GPIO_MODE_OUTPUT);
 
     while(1) {
-/*
-	vario_val+=vario_val_test_dir*0.2;
-	if (abs(vario_val)>=5)
-		vario_val_test_dir *= -1; */
-//	audiovario_update(vario_val);
-
-	//vTaskDelay(200/portTICK_PERIOD_MS);
-
         gpio_set_level(BLINK_GPIO, 1);
         vTaskDelay(100 / portTICK_PERIOD_MS);
         gpio_set_level(BLINK_GPIO, 0);
@@ -91,7 +83,7 @@ void app_main(void ) {
 	printf("Running 1\n");
 	sensor_read_init();
 	printf("Running 2\n");
-	audiovario_start();
+	//audiovario_start();
 
 	xTaskCreate(&networking_task, "networking_task", STACK_SIZE, NULL, 4, NULL);
 	xTaskCreate(&control_task, "control_task", STACK_SIZE, NULL, 4, NULL);

@@ -163,7 +163,7 @@ static void net_tx_task(void *pvParameters) {
 
 		for (int i=0; i<LARK_MAX_STA_CONN; i++) {
 			if (client_sockets[i] >= 0) {
-				int len = send(client_sockets[i], databuff, strlen(databuff), 0);
+				int len = send(client_sockets[i], databuff, sizeof(tep_sensor), 0);
 				if (len <= 0) {
 					int err = get_socket_error_code(client_sockets[i]);
 					if (err != ENOMEM)

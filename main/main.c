@@ -33,14 +33,12 @@
 #include "sdkconfig.h"
 
 #include "audiovario.h"
+#include "bluetooth_spp.h"
 #include "controls.h"
 #include "net.h"
+#include "nmea_mux.h"
 #include "semaphores.h"
 #include "sensor.h"
-#include "nmea_mux.h"
-
-
-
 
 /* globals */
 #define STACK_SIZE 4096
@@ -68,6 +66,8 @@ void app_main(void ) {
 
 	net_feed_semaphore = xSemaphoreCreateBinary();
 	audio_feed_semaphore = xSemaphoreCreateBinary();
+
+	bluetooth_init();
 
 	printf("Running 1\n");
 	sensor_read_init();

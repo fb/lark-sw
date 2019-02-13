@@ -27,9 +27,6 @@
 #define LARK_DEFAULT_PWD ""
 #define NMEA_PORT 4353
 
-extern SemaphoreHandle_t net_feed_semaphore; 
-
-
 void networking_task(void *pvParameters);
 
 #endif

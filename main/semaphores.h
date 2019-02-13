@@ -1,6 +1,5 @@
 /* Lark TE vario computer
- * Copyright (C) 2018 Tomas Hlavacek (tomas.hlavacek@akaflieg.tu-darmstadt.de)
- * Copyright (C) 2014  The openvario project
+ * Copyright (C) 2014 The LarkVario project
  *
  * This file is part of Lark.
  *
@@ -18,8 +17,10 @@
  * along with Lark.  If not, see <http://www.gnu.org/licenses/>.
  */
 
-#ifndef VARIO_H_
-#define VARIO_H_
+#ifndef SEMAPHORES_H
+#define SEMAPHORES_H
 
+extern SemaphoreHandle_t net_feed_semaphore; 
+extern SemaphoreHandle_t audio_feed_semaphore;
 
-#endif
+#endif // SEMAPHORES_H

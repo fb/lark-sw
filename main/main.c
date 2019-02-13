@@ -38,10 +38,11 @@
 
 #include "sdkconfig.h"
 
-#include "ms5611.h"
 #include "audiovario.h"
 #include "controls.h"
 #include "net.h"
+#include "semaphores.h"
+#include "sensor.h"
 #include "vario.h"
 
 
@@ -51,7 +52,6 @@
 #define STACK_SIZE 4096
 
 
-float vario_val_test_dir = 1;
 #define BLINK_GPIO 5
 void debug_task(void *pvParameter)
 {

@@ -71,7 +71,6 @@ typedef enum audiovario_mode {
   stf   = 1
 } audiovario_mode_t;
 
-extern SemaphoreHandle_t audio_feed_semaphore;
 
 /* API definitions */
 

@@ -49,6 +49,7 @@ typedef struct audiovario_config {
 } audiovario_config_t;
 
 
+extern float vario_val;
 
 /* global config */
 audiovario_config_t vario_config[2];

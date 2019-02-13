@@ -1,6 +1,6 @@
-/* Lark TE vario computer
+/* Lark sensor module
  * Copyright (C) 2018 Tomas Hlavacek (tomas.hlavacek@akaflieg.tu-darmstadt.de)
- * Copyright (C) 2014  The openvario project
+ * Copyright (C) 2018 Fabian Bartschke
  *
  * This file is part of Lark.
  *
@@ -30,5 +30,7 @@ typedef struct
     float press_mbar;
     float temp_celsius;
 } press_temp_t;
+
+int sensor_read_init(void);
 
 #endif

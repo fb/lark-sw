@@ -1,6 +1,5 @@
 /* Lark TE vario computer
- * Copyright (C) 2018 Tomas Hlavacek (tomas.hlavacek@akaflieg.tu-darmstadt.de)
- * Copyright (C) 2014  The openvario project
+ * Copyright (C) 2018  The LarkVario project
  *
  * This file is part of Lark.
  *
@@ -21,5 +20,8 @@
 #ifndef VARIO_H_
 #define VARIO_H_
 
+void vario_init();
+void vario_update(float, float, float);
+float vario_get_d_te();
 
 #endif

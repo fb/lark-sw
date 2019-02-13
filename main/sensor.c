@@ -38,6 +38,7 @@
 #include "semaphores.h"
 #include "ms5611.h"
 #include "sensor.h"
+#include "vario.h" // vario_feed
 
 #define LOG_LOCAL_LEVEL ESP_LOG_VERBOSE
 #include "esp_log.h"
@@ -67,6 +68,7 @@ void sensor_read_round()
 
 	static int32_t rawpress = 0;
 	static int32_t rawtemp = 0;
+    static int32_t last_sample_microseconds = 0; // 32 bits should be enough
 
     tep_sensor.header = 0x5555;
     tep_sensor.time = (uint16_t)esp_timer_get_time();
@@ -77,6 +79,17 @@ void sensor_read_round()
 			rawpress = ms5611_get_conv(&tep_dev);
 
             ms5611_start_conv_temp(&tep_dev);
+
+            // TODO: why does this happen sometimes?
+            if(tep_sensor.press_mbar < 150.0)
+                break; // invalid
+
+            int32_t this_sample_microseconds = esp_timer_get_time();
+            int32_t diff = (this_sample_microseconds - last_sample_microseconds);
+            last_sample_microseconds = this_sample_microseconds;
+            float dt_seconds = diff / 1e6;
+
+            vario_update(tep_sensor.press_mbar, 0.25, dt_seconds);
 
             /* Start temp measurement */
 			break;
@@ -172,6 +185,8 @@ int sensor_read_init(void) {
 		ESP_LOGE(TAG, "Can not read from TEP sensor. Finish.");
 		return ESP_FAIL;
 	}
+
+    vario_init();
 
 	/* create read semaphore */
 	timer_semaphore = xSemaphoreCreateBinary();

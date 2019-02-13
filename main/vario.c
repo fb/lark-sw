@@ -23,35 +23,14 @@
 #include <errno.h>
 #include <math.h>
 
-#include "freertos/FreeRTOS.h"
-#include "freertos/task.h"
-#include "freertos/semphr.h"
-#include "freertos/event_groups.h"
-#include "freertos/queue.h"
-#include "driver/i2c.h"
-
-#include "sdkconfig.h"
-
-#include "audiovario.h"
-#include "net.h"
 #include "sensor.h"
 
 #define LOG_LOCAL_LEVEL ESP_LOG_VERBOSE
 #include "esp_log.h"
 
-#define STACK_SIZE 4096
 #define TAG "vario: "
 
 float vario_val;
-
-/* TE vario computation from Kalman filter output. Taken from OpenVario. */
-static float ComputeVario(const float p, const float d_p)
-{
-  static const float FACTOR = -2260.389548275485;
-  static const float EXP = -0.8097374740609689;
-  return FACTOR*pow(p, EXP) * d_p;
-}
-
 
 /* Kalman filter implementation taken from OpenVario. */
 typedef struct {
@@ -67,7 +46,6 @@ typedef struct {
         float var_x_accel_;
 } t_kalmanfilter1d;
 
-t_kalmanfilter1d vkf;
 
 static void KalmanFiler1d_update(t_kalmanfilter1d* filter, float z_abs, float var_z_abs, float dt)
 {
@@ -107,6 +85,8 @@ static void KalmanFiler1d_update(t_kalmanfilter1d* filter, float z_abs, float va
 	filter->p_vel_vel_ -= filter->p_abs_vel_ * k_vel;
 	filter->p_abs_vel_ -= filter->p_abs_vel_ * k_abs;
 	filter->p_abs_abs_ -= filter->p_abs_abs_ * k_abs;
+
+    ESP_LOGD(TAG, "%f %f %f", z_abs, filter->x_abs_, filter->x_vel_);
 }
 
 static void KalmanFilter1d_reset(t_kalmanfilter1d* filter)
@@ -114,10 +94,34 @@ static void KalmanFilter1d_reset(t_kalmanfilter1d* filter)
 	filter->x_abs_ = 0.0;
 	filter->x_vel_ = 0.0;
 
-	filter->p_abs_abs_ = 0.0;
+	filter->p_abs_abs_ = 950.0;
 	filter->p_abs_vel_ = 0.0;
 	filter->p_vel_vel_ = 0.0;
 	
-	filter->var_x_accel_ = 0.0;
+	filter->var_x_accel_ = 0.3;
 }
 
+/* TE vario computation from Kalman filter output. Taken from OpenVario. */
+static float ComputeVario(const float p, const float d_p)
+{
+  static const float FACTOR = -2260.389548275485;
+  static const float EXP = -0.8097374740609689;
+  return FACTOR*pow(p, EXP) * d_p;
+}
+
+t_kalmanfilter1d vkf;
+
+void vario_init()
+{
+    KalmanFilter1d_reset(&vkf);
+}
+
+void vario_update(float pte_hectopascal, float var, float dt)
+{
+    KalmanFiler1d_update(&vkf, pte_hectopascal, var, dt);
+}
+
+float vario_get_d_te()
+{
+    return ComputeVario(vkf.x_abs_, vkf.x_vel_);
+}

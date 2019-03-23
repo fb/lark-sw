@@ -1,91 +1,87 @@
-/* Lark MS5611 driver
- * Copyright (C) 2018 Tomas Hlavacek (tomas.hlavacek@akaflieg.tu-darmstadt.de)
- * Copyright (C) 2011-2012 Bitcraze AB
- * Copyright (C) 2011 Fabio Varesano <fvaresano@yahoo.it>
- * 
- * This file is part of Lark.
+/**
+ * \file ms5611.h
  *
- * Lark is free software: you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation, either version 3 of the License, or
- * (at your option) any later version.
+ * \brief ms5611 Temperature sensor driver header file
  *
- * Lark is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
+ * Copyright (c) 2016 Measurement Specialties. All rights reserved.
  *
- * You should have received a copy of the GNU General Public License
- * along with Lark.  If not, see <http://www.gnu.org/licenses/>.
+ * \asf_license_start
+ *
+ * \page License
+ *
+ *
+ * \asf_license_stop
+ *
  */
 
-#ifndef MS5611_H
-#define MS5611_H
+#ifndef ms5611_H_INCLUDED
+#define ms5611_H_INCLUDED
 
-// addresses of the device
-#define MS5611_ADDR_CSB_HIGH  0x76   //CBR=1 0x76 I2C address when CSB is connected to HIGH (VCC)
-#define MS5611_ADDR_CSB_LOW   0x77   //CBR=0 0x77 I2C address when CSB is connected to LOW (GND)
+#include <stdint.h>
+#include <stdbool.h>
+#include <math.h>
 
-// registers of the device
-#define MS5611_D1 0x40
-#define MS5611_D2 0x50
-#define MS5611_RESET 0x1E
+enum ms5611_resolution_osr {
+	ms5611_resolution_osr_256 = 0,
+	ms5611_resolution_osr_512,
+	ms5611_resolution_osr_1024,
+	ms5611_resolution_osr_2048,
+	ms5611_resolution_osr_4096
+};
 
-// D1 and D2 result size (bytes)
-#define MS5611_D1D2_SIZE 3
+enum ms5611_status {
+	ms5611_status_ok,
+	ms5611_status_no_i2c_acknowledge,
+	ms5611_status_i2c_transfer_error,
+	ms5611_status_crc_error
+};
+	
+// Functions
 
-// OSR (Over Sampling Ratio) constants
-#define MS5611_OSR_256 0x00
-#define MS5611_OSR_512 0x02
-#define MS5611_OSR_1024 0x04
-#define MS5611_OSR_2048 0x06
-#define MS5611_OSR_4096 0x08
-#define MS5611_OSR_DEFAULT MS5611_OSR_4096
+/**
+ * \brief Configures the SERCOM I2C master to be used with the ms5611 device.
+ */
+void ms5611_init(void);
 
-#define MS5611_PROM_BASE_ADDR 0xA2 // by adding ints from 0 to 6 we can read all the prom configuration values.
-// C1 will be at 0xA2 and all the subsequent are multiples of 2
-#define MS5611_PROM_REG_COUNT 6 // number of registers in the PROM
-#define MS5611_PROM_REG_SIZE 2 // size in bytes of a prom registry.
+/**
+ * \brief Check whether ms5611 device is connected
+ *
+ * \return bool : status of ms5611
+ *       - true : Device is present
+ *       - false : Device is not acknowledging I2C address
+  */
+bool ms5611_is_connected(void);
 
-// Self test parameters. Only checks that values are sane
-#define MS5611_ST_PRESS_MAX   (1100.0) //mbar
-#define MS5611_ST_PRESS_MIN   (450.0)  //mbar
-#define MS5611_ST_TEMP_MAX    (60.0)   //degree celcius
-#define MS5611_ST_TEMP_MIN    (-20.0)  //degree celcius
+/**
+ * \brief Reset the ms5611 device
+ *
+ * \return ms5611_status : status of ms5611
+ *       - ms5611_status_ok : I2C transfer completed successfully
+ *       - ms5611_status_i2c_transfer_error : Problem with i2c transfer
+ *       - ms5611_status_no_i2c_acknowledge : I2C did not acknowledge
+ */
+enum ms5611_status ms5611_reset(void);
 
-// Constants used to determine altitude from pressure
-#define CONST_SEA_PRESSURE 102610.f //1026.1f //http://www.meteo.physik.uni-muenchen.de/dokuwiki/doku.php?id=wetter:stadt:messung
-#define CONST_PF 0.1902630958 //(1/5.25588f) Pressure factor
-#define CONST_PF2 44330.0f
+/**
+ * \brief Set  ADC resolution.
+ *
+ * \param[in] ms5611_resolution_osr : Resolution requested
+ *
+ */
+void ms5611_set_resolution(enum ms5611_resolution_osr );
 
+/**
+ * \brief Reads the temperature and pressure ADC value and compute the compensated values.
+ *
+ * \param[out] float* : Celsius Degree temperature value
+ * \param[out] float* : mbar pressure value
+ *
+ * \return ms5611_status : status of ms5611
+ *       - ms5611_status_ok : I2C transfer completed successfully
+ *       - ms5611_status_i2c_transfer_error : Problem with i2c transfer
+ *       - ms5611_status_no_i2c_acknowledge : I2C did not acknowledge
+ *       - ms5611_status_crc_error : CRC check error on on the PROM coefficients
+ */
+enum ms5611_status ms5611_read_temperature_and_pressure(float *, float *);
 
-typedef struct calibration_reg{
-	uint16_t psens;
-	uint16_t off;
-	uint16_t tcs;
-	uint16_t tco;
-	uint16_t tref;
-	uint16_t tsens;
-} calibration_reg_t;
-
-
-typedef struct ms5611_drv {
-	i2c_port_t i2c_num;
-	uint8_t addr;
-	int initialized;
-	calibration_reg_t cr;
-} ms5611_drv_t;
-
-void ms5611_reset(ms5611_drv_t *dev);
-int ms5611_init(ms5611_drv_t *dev, i2c_port_t i2c_num, uint8_t addr);
-void ms5611_start_conv_press(ms5611_drv_t *dev);
-void ms5611_start_conv_temp(ms5611_drv_t *dev);
-int32_t ms5611_get_conv(ms5611_drv_t *dev);
-int32_t ms5611_get_deltatemp(ms5611_drv_t *dev, int32_t rawtemp);
-float ms5611_get_temp(ms5611_drv_t *dev, int32_t rawtemp);
-float ms5611_get_pressure(ms5611_drv_t *dev, int32_t rawpress, int32_t rawtemp);
-
-float ms5611_calc_altitude(float pressure/*, float* ground_pressure, float* ground_temp*/);
-
-#endif // MS5611_H
-
+#endif /* ms5611_H_INCLUDED */

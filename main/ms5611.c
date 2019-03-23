@@ -1,260 +1,449 @@
-/* Lark MS5611 driver
- * Copyright (C) 2018 Tomas Hlavacek (tomas.hlavacek@akaflieg.tu-darmstadt.de)
- * Copyright (C) 2011-2012 Bitcraze AB
- * Copyright (C) 2011 Fabio Varesano <fvaresano@yahoo.it>
- * 
- * This file is part of Lark.
+/**
+ * \file ms5611.c
  *
- * Lark is free software: you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation, either version 3 of the License, or
- * (at your option) any later version.
+ * \brief MS5611 Temperature sensor driver source file
  *
- * Lark is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
+ * Copyright (c) 2016 Measurement Specialties. All rights reserved.
  *
- * You should have received a copy of the GNU General Public License
- * along with Lark.  If not, see <http://www.gnu.org/licenses/>.
+ * For details on programming, refer to ms5611 datasheet :
+ * http://www.meas-spec.com/downloads/MS5611-01BA03.pdf
+ *
  */
 
-
-
-#include "freertos/FreeRTOS.h"
-#include "freertos/task.h"
-#include "sdkconfig.h"
-#include "driver/i2c.h"
 #include "ms5611.h"
-#include "math.h"
 
+  /**
+  * The header "i2c.h" has to be implemented for your own platform to 
+  * conform the following protocol :
+  *
+  * enum i2c_transfer_direction {
+  * 	I2C_TRANSFER_WRITE = 0,
+  * 	I2C_TRANSFER_READ  = 1,
+  * };
+  * 
+  * enum status_code {
+  * 	STATUS_OK           = 0x00,
+  * 	STATUS_ERR_OVERFLOW	= 0x01,
+  *		STATUS_ERR_TIMEOUT  = 0x02,
+  * };
+  * 
+  * struct i2c_master_packet {
+  * 	// Address to slave device
+  * 	uint16_t address;
+  * 	// Length of data array
+  * 	uint16_t data_length;
+  * 	// Data array containing all data to be transferred
+  * 	uint8_t *data;
+  * };
+  * 
+  * void i2c_master_init(void);
+  * enum status_code i2c_master_read_packet_wait(struct i2c_master_packet *const packet);
+  * enum status_code i2c_master_write_packet_wait(struct i2c_master_packet *const packet);
+  * enum status_code i2c_master_write_packet_wait_no_stop(struct i2c_master_packet *const packet);
+  */
+#include "i2c.h"
 
-/* i2c abstraction */
+#ifdef __cplusplus
+extern "C" {
+#endif
 
-#define WRITE_BIT                          I2C_MASTER_WRITE /*!< I2C master write */
-#define READ_BIT                           I2C_MASTER_READ  /*!< I2C master read */
-#define ACK_CHECK_EN                       0x1              /*!< I2C master will check ack from slave*/
-#define ACK_CHECK_DIS                      0x0              /*!< I2C master will not check ack from slave */
-#define ACK_VAL                            0x0              /*!< I2C ack value */
-#define NACK_VAL                           0x1              /*!< I2C nack value */
+// Constants
 
-#define I2C_TIMEOUT 1000
-#define TIMESLICES(x) ((x+portTICK_RATE_MS-1)/portTICK_RATE_MS)
+// MS5611 device address
+#define MS5611_ADDR													0x77 //0b1110111
 
-static esp_err_t ms5611_i2c_cmd(i2c_port_t i2c_num, uint8_t addr, uint8_t command)
-{
-	int ret;
-	i2c_cmd_handle_t cmd = i2c_cmd_link_create();
-	i2c_master_start(cmd);
-	i2c_master_write_byte(cmd, addr << 1 | WRITE_BIT, ACK_CHECK_EN);
-	i2c_master_write_byte(cmd, command, ACK_CHECK_EN);
-	i2c_master_stop(cmd);
-	ret = i2c_master_cmd_begin(i2c_num, cmd, TIMESLICES(I2C_TIMEOUT));
-	i2c_cmd_link_delete(cmd);
-	if (ret != ESP_OK) {
-		return ret;
-	}
-	return ret;
-}
+// MS5611 device commands
+#define MS5611_RESET_COMMAND										0x1E
+#define MS5611_START_PRESSURE_ADC_CONVERSION						0x40
+#define MS5611_START_TEMPERATURE_ADC_CONVERSION						0x50
+#define MS5611_READ_ADC												0x00
 
+#define MS5611_CONVERSION_OSR_MASK									0x0F
 
-static esp_err_t ms5611_i2c_write_byte(i2c_port_t i2c_num, uint8_t addr, uint8_t reg, uint8_t data)
-{
-	int ret;
-	i2c_cmd_handle_t cmd = i2c_cmd_link_create();
-	i2c_master_start(cmd);
-	i2c_master_write_byte(cmd, addr << 1 | WRITE_BIT, ACK_CHECK_EN);
-	i2c_master_write_byte(cmd, reg, ACK_CHECK_EN);
-	i2c_master_write_byte(cmd, data, ACK_CHECK_DIS);
-	i2c_master_stop(cmd);
-	ret = i2c_master_cmd_begin(i2c_num, cmd, TIMESLICES(I2C_TIMEOUT));
-	i2c_cmd_link_delete(cmd);
-	if (ret != ESP_OK) {
-		return ret;
-	}
-	return ret;
-}
+#define MS5611_CONVERSION_TIME_OSR_256								1000
+#define MS5611_CONVERSION_TIME_OSR_512								2000
+#define MS5611_CONVERSION_TIME_OSR_1024								3000
+#define MS5611_CONVERSION_TIME_OSR_2048								5000
+#define MS5611_CONVERSION_TIME_OSR_4096								9000
 
+// MS5611 commands
+#define MS5611_PROM_ADDRESS_READ_ADDRESS_0							0xA0
+#define MS5611_PROM_ADDRESS_READ_ADDRESS_1							0xA2
+#define MS5611_PROM_ADDRESS_READ_ADDRESS_2							0xA4
+#define MS5611_PROM_ADDRESS_READ_ADDRESS_3							0xA6
+#define MS5611_PROM_ADDRESS_READ_ADDRESS_4							0xA8
+#define MS5611_PROM_ADDRESS_READ_ADDRESS_5							0xAA
+#define MS5611_PROM_ADDRESS_READ_ADDRESS_6							0xAC
+#define MS5611_PROM_ADDRESS_READ_ADDRESS_7							0xAE
 
-static esp_err_t ms5611_i2c_read_byte(i2c_port_t i2c_num, uint8_t addr, uint8_t reg, uint8_t* data)
-{
-	int ret;
-	ret = ms5611_i2c_cmd(i2c_num, addr, reg);
-	if (ret != ESP_OK) {
-		return ret;
-	}
+// Coefficients indexes for temperature and pressure computation
+#define MS5611_CRC_INDEX											7
+#define MS5611_PRESSURE_SENSITIVITY_INDEX							1 
+#define MS5611_PRESSURE_OFFSET_INDEX								2
+#define MS5611_TEMP_COEFF_OF_PRESSURE_SENSITIVITY_INDEX				3
+#define MS5611_TEMP_COEFF_OF_PRESSURE_OFFSET_INDEX					4
+#define MS5611_REFERENCE_TEMPERATURE_INDEX							5
+#define MS5611_TEMP_COEFF_OF_TEMPERATURE_INDEX						6
+#define MS5611_COEFFICIENT_NUMBERS									8
 
-	i2c_cmd_handle_t cmd = i2c_cmd_link_create();
-	i2c_master_start(cmd);
-	i2c_master_write_byte(cmd, addr | READ_BIT, ACK_CHECK_EN);
-	i2c_master_read_byte(cmd, data, NACK_VAL);
-	i2c_master_stop(cmd);
-	ret = i2c_master_cmd_begin(i2c_num, cmd, TIMESLICES(I2C_TIMEOUT));
-	i2c_cmd_link_delete(cmd);
-	return ret;
-}
+// Static functions
+static enum ms5611_status ms5611_write_command(uint8_t);
+static enum ms5611_status ms5611_read_eeprom_coeff(uint8_t, uint16_t*);
+static enum ms5611_status ms5611_read_eeprom(void);
+static enum ms5611_status ms5611_conversion_and_read_adc( uint8_t, uint32_t *);
+static bool ms5611_crc_check (uint16_t *n_prom, uint8_t crc);
 
+enum ms5611_resolution_osr ms5611_resolution_osr;
+static uint16_t eeprom_coeff[MS5611_COEFFICIENT_NUMBERS];
+static uint32_t conversion_time[5] = {	MS5611_CONVERSION_TIME_OSR_256,
+										MS5611_CONVERSION_TIME_OSR_512,
+										MS5611_CONVERSION_TIME_OSR_1024,
+										MS5611_CONVERSION_TIME_OSR_2048,
+										MS5611_CONVERSION_TIME_OSR_4096};
 
-static esp_err_t ms5611_i2c_read(i2c_port_t i2c_num, uint8_t addr, uint8_t reg, size_t size, uint8_t* data)
-{
-	int ret;
-	ret = ms5611_i2c_cmd(i2c_num, addr, reg);
-	if (ret != ESP_OK) {
-		return ret;
-	}
-
-	i2c_cmd_handle_t cmd = i2c_cmd_link_create();
-	i2c_master_start(cmd);
-	i2c_master_write_byte(cmd, addr << 1 | READ_BIT, ACK_CHECK_EN);
-	if (size>1)
-		i2c_master_read(cmd, data, size-1, ACK_VAL);
-	i2c_master_read_byte(cmd, data+size-1, NACK_VAL);
-	i2c_master_stop(cmd);
-	ret = i2c_master_cmd_begin(i2c_num, cmd, TIMESLICES(I2C_TIMEOUT));
-	i2c_cmd_link_delete(cmd);
-	return ret;
-}
-
-
-
-
-/* ms5611 driver */
-
-
-#define EXTRA_PRECISION      4 // trick to add more precision to the pressure and temp readings
-#define PRESSURE_PER_TEMP 5 // Length of reading cycle: 1x temp, rest pressure. Good values: 1-10
-#define FIX_TEMP 25         // Fixed Temperature. ASL is a function of pressure and temperature, but as the temperature changes so much (blow a little towards the flie and watch it drop 5 degrees) it corrupts the ASL estimates.
-                            // TLDR: Adjusting for temp changes does more harm than good.
+// Default value to ensure coefficients are read before converting temperature
+bool ms5611_coeff_read = false;
 
 /**
- * Reads factory calibration and store it into object variables.
+ * \brief Configures the SERCOM I2C master to be used with the MS5611 device.
  */
-static int ms5611_read_PROM(ms5611_drv_t *dev)
+void ms5611_init(void)
 {
-	uint8_t buffer[MS5611_PROM_REG_SIZE];
-	uint16_t* cru16 = (uint16_t*)&dev->cr;
-	int status;
+	ms5611_resolution_osr = ms5611_resolution_osr_4096;
+	
+    /* Initialize and enable device with config. */
+	i2c_master_init();
+}
 
-	for (int i = 0; i < MS5611_PROM_REG_COUNT; i++) {
-		status = ms5611_i2c_read(dev->i2c_num, dev->addr, (MS5611_PROM_BASE_ADDR + (i * MS5611_PROM_REG_SIZE)), MS5611_PROM_REG_SIZE, buffer);
-		cru16[i] = ((uint16_t)buffer[0] << 8) | buffer[1];
-		if (status)
+/**
+ * \brief Check whether MS5611 device is connected
+ *
+ * \return bool : status of MS5611
+ *       - true : Device is present
+ *       - false : Device is not acknowledging I2C address
+  */
+bool ms5611_is_connected(void)
+{
+	enum status_code i2c_status;
+	
+	struct i2c_master_packet transfer = {
+		.address     = MS5611_ADDR,
+		.data_length = 0,
+		.data        = NULL,
+	};
+	/* Do the transfer */
+	i2c_status = i2c_master_write_packet_wait(&transfer);
+	if( i2c_status != STATUS_OK)
+		return false;
+	
+	return true;
+}
+	
+/**
+ * \brief Reset the MS5611 device
+ *
+ * \return ms5611_status : status of MS5611
+ *       - ms5611_status_ok : I2C transfer completed successfully
+ *       - ms5611_status_i2c_transfer_error : Problem with i2c transfer
+ *       - ms5611_status_no_i2c_acknowledge : I2C did not acknowledge
+ */
+enum ms5611_status  ms5611_reset(void)
+{
+	return ms5611_write_command(MS5611_RESET_COMMAND);
+}
+
+/**
+ * \brief Set  ADC resolution.
+ *
+ * \param[in] ms5611_resolution_osr : Resolution requested
+ *
+ */
+void ms5611_set_resolution(enum ms5611_resolution_osr res)
+{
+	ms5611_resolution_osr = res;
+	return;
+}
+
+/**
+ * \brief Writes the MS5611 8-bits command with the value passed
+ *
+ * \param[in] uint8_t : Command value to be written.
+ *
+ * \return ms5611_status : status of MS5611
+ *       - ms5611_status_ok : I2C transfer completed successfully
+ *       - ms5611_status_i2c_transfer_error : Problem with i2c transfer
+ *       - ms5611_status_no_i2c_acknowledge : I2C did not acknowledge
+ */
+enum ms5611_status ms5611_write_command( uint8_t cmd)
+{
+	enum status_code i2c_status;
+	uint8_t data[1];
+		
+	data[0] = cmd;
+		
+	struct i2c_master_packet transfer = {
+		.address     = MS5611_ADDR,
+		.data_length = 1,
+		.data        = data,
+	};
+	/* Do the transfer */
+	i2c_status = i2c_master_write_packet_wait(&transfer);
+	if( i2c_status == STATUS_ERR_OVERFLOW )
+		return ms5611_status_no_i2c_acknowledge;
+	if( i2c_status != STATUS_OK)
+		return ms5611_status_i2c_transfer_error;
+	
+	return ms5611_status_ok;
+}
+
+/**
+ * \brief Reads the ms5611 EEPROM coefficient stored at address provided.
+ *
+ * \param[in] uint8_t : Address of coefficient in EEPROM
+ * \param[out] uint16_t* : Value read in EEPROM
+ *
+ * \return ms5611_status : status of MS5611
+ *       - ms5611_status_ok : I2C transfer completed successfully
+ *       - ms5611_status_i2c_transfer_error : Problem with i2c transfer
+ *       - ms5611_status_no_i2c_acknowledge : I2C did not acknowledge
+ *       - ms5611_status_crc_error : CRC check error on the coefficients
+ */
+enum ms5611_status ms5611_read_eeprom_coeff(uint8_t command, uint16_t *coeff)
+{
+	enum ms5611_status status;
+	enum status_code i2c_status;
+	uint8_t buffer[2];
+	
+	buffer[0] = 0;
+	buffer[1] = 0;
+
+	/* Read data */
+	struct i2c_master_packet read_transfer = {
+		.address     = MS5611_ADDR,
+		.data_length = 2,
+		.data        = buffer,
+	};
+	
+	// Send the conversion command
+	status = ms5611_write_command(command);
+	if(status != ms5611_status_ok)
+		return status;
+	
+	i2c_status = i2c_master_read_packet_wait(&read_transfer);
+	if( i2c_status == STATUS_ERR_OVERFLOW )
+		return ms5611_status_no_i2c_acknowledge;
+	if( i2c_status != STATUS_OK)
+		return ms5611_status_i2c_transfer_error;
+		
+	*coeff = (buffer[0] << 8) | buffer[1];
+    
+    if (*coeff == 0)
+        return ms5611_status_i2c_transfer_error;
+	
+	return ms5611_status_ok;	
+}
+
+/**
+ * \brief Reads the ms5611 EEPROM coefficients to store them for computation.
+ *
+ * \return ms5611_status : status of MS5611
+ *       - ms5611_status_ok : I2C transfer completed successfully
+ *       - ms5611_status_i2c_transfer_error : Problem with i2c transfer
+ *       - ms5611_status_no_i2c_acknowledge : I2C did not acknowledge
+ *       - ms5611_status_crc_error : CRC check error on the coefficients
+ */
+enum ms5611_status ms5611_read_eeprom(void)
+{
+	enum ms5611_status status;
+	uint8_t i;
+	
+	for( i=0 ; i< MS5611_COEFFICIENT_NUMBERS ; i++)
+	{
+		status = ms5611_read_eeprom_coeff( MS5611_PROM_ADDRESS_READ_ADDRESS_0 + i*2, eeprom_coeff+i);
+		if(status != ms5611_status_ok)
 			return status;
 	}
+    
+	if( !ms5611_crc_check( eeprom_coeff, eeprom_coeff[MS5611_CRC_INDEX] & 0x000F ) )
+		return ms5611_status_crc_error;
+	
+	ms5611_coeff_read = true;
+	
+	return ms5611_status_ok;
+}
 
-	printf("DEBUG ms5611 cr psens=%d\n", dev->cr.psens);
-	printf("DEBUG ms5611 cr off=%d\n", dev->cr.off);
-	printf("DEBUG ms5611 cr tcs=%d\n", dev->cr.tcs);
-	printf("DEBUG ms5611 cr tco=%d\n", dev->cr.tco);
-	printf("DEBUG ms5611 cr tref=%d\n", dev->cr.tref);
-	printf("DEBUG ms5611 cr tsens=%d\n", dev->cr.tsens);
+/**
+ * \brief Triggers conversion and read ADC value
+ *
+ * \param[in] uint8_t : Command used for conversion (will determine Temperature vs Pressure and osr)
+ * \param[out] uint32_t* : ADC value.
+ *
+ * \return ms5611_status : status of MS5611
+ *       - ms5611_status_ok : I2C transfer completed successfully
+ *       - ms5611_status_i2c_transfer_error : Problem with i2c transfer
+ *       - ms5611_status_no_i2c_acknowledge : I2C did not acknowledge
+ */
+static enum ms5611_status ms5611_conversion_and_read_adc(uint8_t cmd, uint32_t *adc)
+{
+	enum ms5611_status status;
+	enum status_code i2c_status;
+	uint8_t buffer[3];
+	
+	buffer[0] = 0;
+	buffer[1] = 0;
+	buffer[2] = 0;
 
+	/* Read data */
+    struct i2c_master_packet read_transfer = {
+		.address     = MS5611_ADDR,
+		.data_length = 3,
+		.data        = buffer,
+	};
+
+	status = ms5611_write_command(cmd);
+	// delay conversion depending on resolution
+	delay_ms( conversion_time[ (cmd & MS5611_CONVERSION_OSR_MASK)/2 ]/1000 );
+	if( status != ms5611_status_ok)
+		return status;
+
+	// Send the read command
+	status = ms5611_write_command(MS5611_READ_ADC);
+	if( status != ms5611_status_ok)
+		return status;
+	
+    i2c_status = i2c_master_read_packet_wait(&read_transfer);
+	if( i2c_status == STATUS_ERR_OVERFLOW )
+		return ms5611_status_no_i2c_acknowledge;
+	if( i2c_status != STATUS_OK)
+		return ms5611_status_i2c_transfer_error;
+
+	*adc = ((uint32_t)buffer[0] << 16) | ((uint32_t)buffer[1] << 8) | buffer[2];
+	
 	return status;
 }
 
 /**
- * Send a reset command to the device. With the reset command the device
- * populates its internal registers with the values read from the PROM.
+ * \brief Reads the temperature and pressure ADC value and compute the compensated values.
+ *
+ * \param[out] float* : Celsius Degree temperature value
+ * \param[out] float* : mbar pressure value
+ *
+ * \return ms5611_status : status of MS5611
+ *       - ms5611_status_ok : I2C transfer completed successfully
+ *       - ms5611_status_i2c_transfer_error : Problem with i2c transfer
+ *       - ms5611_status_no_i2c_acknowledge : I2C did not acknowledge
+ *       - ms5611_status_crc_error : CRC check error on the coefficients
  */
-void ms5611_reset(ms5611_drv_t *dev)
+enum ms5611_status ms5611_read_temperature_and_pressure( float *temperature, float *pressure)
 {
-	ms5611_i2c_cmd(dev->i2c_num, dev->addr, TIMESLICES(MS5611_RESET));
-}
+	enum ms5611_status status = ms5611_status_ok;
+	uint32_t adc_temperature, adc_pressure;
+	int32_t dT, TEMP;
+	int64_t OFF, SENS, P, T2, OFF2, SENS2;
+	uint8_t cmd;
+	
+	// If first time adc is requested, get EEPROM coefficients
+	if( ms5611_coeff_read == false )
+		status = ms5611_read_eeprom();
+	if( status != ms5611_status_ok)
+		return status;
+	
+	// First read temperature
+	cmd = ms5611_resolution_osr*2;
+	cmd |= MS5611_START_TEMPERATURE_ADC_CONVERSION;
+	status = ms5611_conversion_and_read_adc( cmd, &adc_temperature);
+	if( status != ms5611_status_ok)
+		return status;
 
-#define MS5611_RESET_TIME 5
+	// Now read pressure
+	cmd = ms5611_resolution_osr*2;
+	cmd |= MS5611_START_PRESSURE_ADC_CONVERSION;
+	status = ms5611_conversion_and_read_adc( cmd, &adc_pressure);
+	if( status != ms5611_status_ok)
+		return status;
+    
+    if (adc_temperature == 0 || adc_pressure == 0)
+        return ms5611_status_i2c_transfer_error;
 
-int ms5611_init(ms5611_drv_t *dev, i2c_port_t i2c_num, uint8_t addr)
-{
-	if (dev->initialized)
-		return 0;
-
-	dev->i2c_num = i2c_num;
-	dev->addr = addr;
-
-	ms5611_reset(dev); // reset the device to populate its internal PROM registers
-	vTaskDelay(MS5611_RESET_TIME/portTICK_PERIOD_MS);
-	if (ms5611_read_PROM(dev)) {
-		return -1;
+	// Difference between actual and reference temperature = D2 - Tref
+	dT = (int32_t)adc_temperature - ((int32_t)eeprom_coeff[MS5611_REFERENCE_TEMPERATURE_INDEX] <<8 );
+	
+	// Actual temperature = 2000 + dT * TEMPSENS
+	TEMP = 2000 + ((int64_t)dT * (int64_t)eeprom_coeff[MS5611_TEMP_COEFF_OF_TEMPERATURE_INDEX] >> 23) ;
+	
+	// Second order temperature compensation
+	if( TEMP < 2000 )
+	{
+		T2 = ( 3 * ( (int64_t)dT  * (int64_t)dT  ) ) >> 33;
+		OFF2 = 61 * ((int64_t)TEMP - 2000) * ((int64_t)TEMP - 2000) / 16 ;
+		SENS2 = 29 * ((int64_t)TEMP - 2000) * ((int64_t)TEMP - 2000) / 16 ;
+		
+		if( TEMP < -1500 )
+		{
+			OFF2 += 17 * ((int64_t)TEMP + 1500) * ((int64_t)TEMP + 1500) ;
+			SENS2 += 9 * ((int64_t)TEMP + 1500) * ((int64_t)TEMP + 1500) ;
+		}
 	}
-
-	dev->initialized = 1;
-	return 0;
-}
-
-static void ms5611_start_conv(ms5611_drv_t *dev, int8_t command)
-{
-	ms5611_i2c_cmd(dev->i2c_num, dev->addr, command);
-}
-
-void ms5611_start_conv_press(ms5611_drv_t *dev) {
-	ms5611_start_conv(dev, MS5611_D1 + MS5611_OSR_DEFAULT);
-}
-
-void ms5611_start_conv_temp(ms5611_drv_t *dev) {
-	ms5611_start_conv(dev, MS5611_D2 + MS5611_OSR_DEFAULT);
-}
-
-int32_t ms5611_get_conv(ms5611_drv_t *dev)
-{
-	int32_t conversion = 0;
-	uint8_t buffer[MS5611_D1D2_SIZE];
-
-	ms5611_i2c_read(dev->i2c_num, dev->addr, 0, MS5611_D1D2_SIZE, buffer);
-	conversion = ((int32_t)buffer[0] << 16) |
-		((int32_t)buffer[1] << 8) | buffer[2];
-
-	return conversion;
-}
-
-int32_t ms5611_get_deltatemp(ms5611_drv_t *dev, int32_t rawtemp)
-{
-	if (rawtemp != 0)
-		return rawtemp - (((int32_t)dev->cr.tref) << 8);
 	else
-		return 0;
+	{
+		T2 = ( 5 * ( (int64_t)dT  * (int64_t)dT  ) ) >> 38;
+		OFF2 = 0 ;
+		SENS2 = 0 ;
+	}
+	
+	// OFF = OFF_T1 + TCO * dT
+	OFF = ( (int64_t)(eeprom_coeff[MS5611_PRESSURE_OFFSET_INDEX]) << 16 ) + ( ( (int64_t)(eeprom_coeff[MS5611_TEMP_COEFF_OF_PRESSURE_OFFSET_INDEX]) * dT ) >> 7 ) ;
+	OFF -= OFF2 ;
+	
+	// Sensitivity at actual temperature = SENS_T1 + TCS * dT
+	SENS = ( (int64_t)eeprom_coeff[MS5611_PRESSURE_SENSITIVITY_INDEX] << 15 ) + ( ((int64_t)eeprom_coeff[MS5611_TEMP_COEFF_OF_PRESSURE_SENSITIVITY_INDEX] * dT) >> 8 ) ;
+	SENS -= SENS2 ;
+	
+	// Temperature compensated pressure = D1 * SENS - OFF
+	P = ( ( (adc_pressure * SENS) >> 21 ) - OFF ) >> 15 ;
+	
+	*temperature = ( (float)TEMP - T2 ) / 100;
+	*pressure = (float)P / 100;
+	
+	return status;
 }
-
-float ms5611_get_temp(ms5611_drv_t *dev, int32_t rawtemp)
-{
-	/* see datasheet page 7 for formulas */
-	int32_t dT = ms5611_get_deltatemp(dev, rawtemp);
-	if (dT != 0)
-    		return (float)(((1 << EXTRA_PRECISION) * 2000)
-			+ (((int64_t)dT * dev->cr.tsens) >> (23 - EXTRA_PRECISION)))
-			/ ((1 << EXTRA_PRECISION)* 100.0);
-
-	else
-		return 0;
-}
-
-float ms5611_get_pressure(ms5611_drv_t *dev, int32_t rawpress, int32_t rawtemp)
-{
-	/* see datasheet page 7 for formulas */
-	int64_t dT = (int64_t)ms5611_get_deltatemp(dev, rawtemp);
-	if (dT == 0)
-		return 0;
-
-	int64_t off = (((int64_t)dev->cr.off) << 16) + ((dev->cr.tco * dT) >> 7);
-	int64_t sens = (((int64_t)dev->cr.psens) << 15) + ((dev->cr.tcs * dT) >> 8);
-	if (rawpress != 0)
-		return ((((rawpress * sens) >> 21) - off) >> (15 - EXTRA_PRECISION))
-			/ ((1 << EXTRA_PRECISION) * 100.0);
-	else
-		return 0;
-}
-
 
 /**
- * Converts pressure to altitude above sea level (ASL) in meters
-*/
-float ms5611_calc_altitude(float pressure/*, float* ground_pressure, float* ground_temp*/)
+ * \brief CRC check
+ *
+ * \param[in] uint16_t *: List of EEPROM coefficients
+ * \param[in] uint8_t : crc to compare with
+ *
+ * \return bool : TRUE if CRC is OK, FALSE if KO
+ */
+bool ms5611_crc_check (uint16_t *n_prom, uint8_t crc)
 {
-	if (pressure > 0) {
-		//return (1.f - pow(pressure / CONST_SEA_PRESSURE, CONST_PF)) * CONST_PF2;
-		//return ((pow((1015.7 / pressure), CONST_PF) - 1.0) * (25. + 273.15)) / 0.0065;
-		return ((pow((1015.7 / pressure), CONST_PF) - 1.0) * (FIX_TEMP + 273.15)) / 0.0065;
-	} else
-		return 0;
+    uint8_t cnt, n_bit; 
+    uint16_t n_rem; 
+    uint16_t crc_read;
+
+    n_rem = 0x00;
+    crc_read = n_prom[7]; 
+    n_prom[7] = (0xFF00 & (n_prom[7])); 
+    for (cnt = 0; cnt < 16; cnt++) 
+    {
+        if (cnt%2==1) n_rem ^= (unsigned short) ((n_prom[cnt>>1]) & 0x00FF);
+        else n_rem ^= (unsigned short) (n_prom[cnt>>1]>>8);
+        for (n_bit = 8; n_bit > 0; n_bit--)
+        {
+            if (n_rem & (0x8000))
+                n_rem = (n_rem << 1) ^ 0x3000;
+            else
+                n_rem = (n_rem << 1);
+        }
+    }
+    n_rem = (0x000F & (n_rem >> 12)); 
+    n_prom[7] = crc_read;
+    n_rem ^= 0x00;
+        
+	return  ( n_rem == crc );
 }
 
-
+#ifdef __cplusplus
+}
+#endif

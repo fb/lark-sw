@@ -38,11 +38,9 @@ struct i2c_master_packet {
 	uint8_t *data;
 };
 
-void i2c_master_init(void);
 enum status_code i2c_master_read_packet_wait(struct i2c_master_packet *const packet);
 enum status_code i2c_master_write_packet_wait(struct i2c_master_packet *const packet);
 enum status_code i2c_master_write_packet_wait_no_stop(struct i2c_master_packet *const packet);
-  
 
 #ifdef __cplusplus
 extern "C" {
@@ -111,9 +109,6 @@ bool ms5611_coeff_read = false;
 void ms5611_init(void)
 {
 	ms5611_resolution_osr = ms5611_resolution_osr_4096;
-	
-    /* Initialize and enable device with config. */
-	i2c_master_init();
 }
 
 /**

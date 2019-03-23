@@ -27,12 +27,8 @@
 #include "freertos/task.h"
 #include "freertos/semphr.h"
 #include "freertos/event_groups.h"
-#include "freertos/queue.h"
 
 #include "esp_err.h"
-//#include "nvs_flash.h"
-
-//#include "sdkconfig.h"
 
 #include "semaphores.h"
 #include "ms5611.h"
@@ -52,80 +48,13 @@
 
 
 /* Sensor device structs */
-ms5611_drv_t tep_dev;
 SemaphoreHandle_t timer_semaphore = NULL;
 press_temp_t tep_sensor;
 
 void sensor_read_round()
 {
-	static int stage = 0;
-
-	static int32_t rawpress = 0;
-	static int32_t rawtemp = 0;
-    static int32_t last_sample_microseconds = 0; // 32 bits should be enough
-
-    tep_sensor.header = 0x5555;
-    tep_sensor.time = (uint16_t)esp_timer_get_time();
-
-	switch (stage) {
-		case 0: // at t = 0
-			/* TEK pressure */
-			rawpress = ms5611_get_conv(&tep_dev);
-
-            ms5611_start_conv_temp(&tep_dev);
-
-            // TODO: why does this happen sometimes?
-            if(tep_sensor.press_mbar < 150.0)
-                break; // invalid
-
-            int32_t this_sample_microseconds = esp_timer_get_time();
-            int32_t diff = (this_sample_microseconds - last_sample_microseconds);
-            last_sample_microseconds = this_sample_microseconds;
-            float dt_seconds = diff / 1e6;
-
-            vario_update(tep_sensor.press_mbar, 0.25, dt_seconds);
-
-            /* Start temp measurement */
-			break;
-        case 1: // at t = 12.5 ms
-            /* read temp values */
-        	rawtemp = ms5611_get_conv(&tep_dev);
-
-        	/* start press */
-        	ms5611_start_conv_press(&tep_dev);
-
-        	// convert / display
-            tep_sensor.press_mbar = ms5611_get_pressure(&tep_dev, rawpress, rawtemp);
-            tep_sensor.temp_celsius = ms5611_get_temp(&tep_dev, rawtemp);
-            ESP_LOGD(TAG, "tep: %d %d %2.2f %3.3f %5.2f", rawpress, rawtemp, tep_sensor.temp_celsius, tep_sensor.press_mbar, ms5611_calc_altitude(tep_sensor.press_mbar));
-			/* Unblock network -> feed data */
-			xSemaphoreGive(net_feed_semaphore);
-            break;
-		default:
-            break;
-	}
-
-	if(stage == 2)
-		stage = 0;
-	else
-		stage++;
+	//ESP_LOGD(TAG, "tep: %d %d %2.2f %3.3f %5.2f", rawpress, rawtemp, tep_sensor.temp_celsius, tep_sensor.press_mbar, ms5611_calc_altitude(tep_sensor.press_mbar));
 }
-
-static float compute_pressure(ms5611_drv_t *dev) {
-	int32_t rawtemp;
-	int32_t rawpress;
-
-	ms5611_start_conv_temp(dev);
-	vTaskDelay(20/portTICK_PERIOD_MS);
-	rawtemp = ms5611_get_conv(dev);
-
-	ms5611_start_conv_press(dev);
-	vTaskDelay(20/portTICK_PERIOD_MS);
-	rawpress = ms5611_get_conv(dev);
-
-	return ms5611_get_pressure(dev, rawpress, rawtemp);
-}
-
 
 static void sensor_read_timer_callback(void *arg) {
 	xSemaphoreGive(timer_semaphore);
@@ -144,28 +73,7 @@ static void sensor_read_task(void *pvParameter) {
 
 
 int sensor_read_init(void) {
-	i2c_init();
-
-	int ret = -1;
-	while(ret != 0)
-	{
-		ret = ms5611_init(&tep_dev, I2C_NUM_0, I2C_TEP_ADDR);
-		ESP_LOGD(TAG, "%s: ms5611 init: %d\n", __func__, ret);
-		vTaskDelay(100 / portTICK_PERIOD_MS);
-	}
-
-	float tep_init = 0;
-	int sensor_test = 0;
-	while ((tep_init < 100) || (tep_init > 1200) || (sensor_test > 1000)) {
-		tep_init = compute_pressure(&tep_dev);
-		sensor_test++;
-	}
-	if (sensor_test >= 1000) {
-		ESP_LOGE(TAG, "Can not read from TEP sensor. Finish.");
-		return ESP_FAIL;
-	}
-
-    vario_init();
+	vario_init();
 
 	/* create read semaphore */
 	timer_semaphore = xSemaphoreCreateBinary();

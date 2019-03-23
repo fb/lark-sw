@@ -12,36 +12,37 @@
 
 #include "ms5611.h"
 
-  /**
-  * The header "i2c.h" has to be implemented for your own platform to 
-  * conform the following protocol :
-  *
-  * enum i2c_transfer_direction {
-  * 	I2C_TRANSFER_WRITE = 0,
-  * 	I2C_TRANSFER_READ  = 1,
-  * };
-  * 
-  * enum status_code {
-  * 	STATUS_OK           = 0x00,
-  * 	STATUS_ERR_OVERFLOW	= 0x01,
-  *		STATUS_ERR_TIMEOUT  = 0x02,
-  * };
-  * 
-  * struct i2c_master_packet {
-  * 	// Address to slave device
-  * 	uint16_t address;
-  * 	// Length of data array
-  * 	uint16_t data_length;
-  * 	// Data array containing all data to be transferred
-  * 	uint8_t *data;
-  * };
-  * 
-  * void i2c_master_init(void);
-  * enum status_code i2c_master_read_packet_wait(struct i2c_master_packet *const packet);
-  * enum status_code i2c_master_write_packet_wait(struct i2c_master_packet *const packet);
-  * enum status_code i2c_master_write_packet_wait_no_stop(struct i2c_master_packet *const packet);
-  */
-#include "i2c.h"
+#include "esp_i2c.h"
+
+/**
+ * The header "i2c.h" has to be implemented for your own platform to 
+ * conform the following protocol :
+ */
+enum i2c_transfer_direction {
+	I2C_TRANSFER_WRITE = 0,
+	I2C_TRANSFER_READ  = 1,
+};
+
+enum status_code {
+	STATUS_OK           = 0x00,
+	STATUS_ERR_OVERFLOW = 0x01,
+	STATUS_ERR_TIMEOUT  = 0x02,
+};
+
+struct i2c_master_packet {
+	// Address to slave device
+	uint16_t address;
+	// Length of data array
+	uint16_t data_length;
+	// Data array containing all data to be transferred
+	uint8_t *data;
+};
+
+void i2c_master_init(void);
+enum status_code i2c_master_read_packet_wait(struct i2c_master_packet *const packet);
+enum status_code i2c_master_write_packet_wait(struct i2c_master_packet *const packet);
+enum status_code i2c_master_write_packet_wait_no_stop(struct i2c_master_packet *const packet);
+  
 
 #ifdef __cplusplus
 extern "C" {
@@ -302,7 +303,9 @@ static enum ms5611_status ms5611_conversion_and_read_adc(uint8_t cmd, uint32_t *
 
 	status = ms5611_write_command(cmd);
 	// delay conversion depending on resolution
-	delay_ms( conversion_time[ (cmd & MS5611_CONVERSION_OSR_MASK)/2 ]/1000 );
+	
+	// delay_ms( conversion_time[ (cmd & MS5611_CONVERSION_OSR_MASK)/2 ]/1000 );
+	// TODO: try solve this with scheduling
 	if( status != ms5611_status_ok)
 		return status;
 

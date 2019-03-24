@@ -38,9 +38,23 @@ struct i2c_master_packet {
 	uint8_t *data;
 };
 
-enum status_code i2c_master_read_packet_wait(struct i2c_master_packet *const packet);
-enum status_code i2c_master_write_packet_wait(struct i2c_master_packet *const packet);
-enum status_code i2c_master_write_packet_wait_no_stop(struct i2c_master_packet *const packet);
+enum status_code i2c_master_read_packet_wait(struct i2c_master_packet *const packet)
+{
+	int ret = i2c_read_bytes((uint8_t)packet->address, (size_t)packet->data_length, packet->data);
+	if(ret != 0)
+		return STATUS_ERR_TIMEOUT;
+
+	return STATUS_OK;
+}
+
+enum status_code i2c_master_write_packet_wait(struct i2c_master_packet *const packet)
+{
+	int ret = i2c_write_bytes((uint8_t)packet->address, (size_t)packet->data_length, packet->data);
+	if(ret != 0)
+		return STATUS_ERR_TIMEOUT;
+
+	return STATUS_OK;
+}
 
 #ifdef __cplusplus
 extern "C" {

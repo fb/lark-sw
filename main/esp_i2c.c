@@ -13,9 +13,9 @@ void i2c_init(void)
 	int i2c_master_port = I2C_NUM_0;
 	i2c_config_t i2s_conf = {
 		.mode = I2C_MODE_MASTER,
-		.sda_io_num = I2C_SDA,
+		.sda_io_num = GPIO_I2C_SDA,
 		.sda_pullup_en = GPIO_PULLUP_ENABLE,
-		.scl_io_num = I2C_SCL,
+		.scl_io_num = GPIO_I2C_SCL,
 		.scl_pullup_en = GPIO_PULLUP_ENABLE,
 		.master = {
 			.clk_speed = I2C_MASTER_FREQ_HZ

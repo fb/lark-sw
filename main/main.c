@@ -27,8 +27,8 @@
 #include "freertos/task.h"
 #include "freertos/event_groups.h"
 
-//#include "esp_log.h"
-#include "esp_board.c"
+#include "esp_pins.h"
+#include "esp_board.h"
 
 #include "sdkconfig.h"
 
@@ -46,10 +46,10 @@
 #define STACK_SIZE 4096
 
 
-#define BLINK_GPIO 5
+#define BLINK_GPIO GPIO_LED1
 void debug_task(void *pvParameter)
 {
-    //gpio_pad_select_gpio(BLINK_GPIO); //default?
+    gpio_pad_select_gpio(BLINK_GPIO);
     gpio_set_direction(BLINK_GPIO, GPIO_MODE_OUTPUT);
 
     while(1) {

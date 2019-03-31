@@ -1,8 +1,10 @@
 #ifndef ESP_PINS_H_
 #define ESP_PINS_H_
 
-#define GPIO_I2C_SCL 18
-#define GPIO_I2C_SDA 21
+#include "driver/gpio.h"
+
+#define GPIO_I2C_SCL GPIO_SEL_32
+#define GPIO_I2C_SDA GPIO_SEL_33
 
 #define GPIO_LED1 12
 #define GPIO_LED2 2

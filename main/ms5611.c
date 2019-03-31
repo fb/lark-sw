@@ -13,6 +13,7 @@
 #include "ms5611.h"
 
 #include "esp_i2c.h"
+#include "esp_delay.h"
 
 /**
  * The header "i2c.h" has to be implemented for your own platform to 
@@ -31,9 +32,9 @@ enum status_code {
 
 struct i2c_master_packet {
 	// Address to slave device
-	uint16_t address;
+	uint8_t address;
 	// Length of data array
-	uint16_t data_length;
+	size_t data_length;
 	// Data array containing all data to be transferred
 	uint8_t *data;
 };
@@ -56,6 +57,11 @@ enum status_code i2c_master_write_packet_wait(struct i2c_master_packet *const pa
 	return STATUS_OK;
 }
 
+void delay_ms(uint32_t time_ms)
+{
+    esp_delay_ms(time_ms);
+}
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -63,7 +69,7 @@ extern "C" {
 // Constants
 
 // MS5611 device address
-#define MS5611_ADDR													0x77 //0b1110111
+#define MS5611_ADDR													0x76
 
 // MS5611 device commands
 #define MS5611_RESET_COMMAND										0x1E
@@ -90,14 +96,14 @@ extern "C" {
 #define MS5611_PROM_ADDRESS_READ_ADDRESS_7							0xAE
 
 // Coefficients indexes for temperature and pressure computation
-#define MS5611_CRC_INDEX											7
-#define MS5611_PRESSURE_SENSITIVITY_INDEX							1 
-#define MS5611_PRESSURE_OFFSET_INDEX								2
-#define MS5611_TEMP_COEFF_OF_PRESSURE_SENSITIVITY_INDEX				3
-#define MS5611_TEMP_COEFF_OF_PRESSURE_OFFSET_INDEX					4
-#define MS5611_REFERENCE_TEMPERATURE_INDEX							5
-#define MS5611_TEMP_COEFF_OF_TEMPERATURE_INDEX						6
-#define MS5611_COEFFICIENT_NUMBERS									8
+#define MS5611_CRC_INDEX	7
+#define MS5611_C1			1
+#define MS5611_C2			2
+#define MS5611_C3			3
+#define MS5611_C4			4
+#define MS5611_C5			5
+#define MS5611_C6			6
+#define MS5611_COEFFICIENT_NUMBERS  8
 
 // Static functions
 static enum ms5611_status ms5611_write_command(uint8_t);
@@ -123,6 +129,7 @@ bool ms5611_coeff_read = false;
 void ms5611_init(void)
 {
 	ms5611_resolution_osr = ms5611_resolution_osr_4096;
+    ms5611_read_eeprom();
 }
 
 /**
@@ -313,8 +320,9 @@ static enum ms5611_status ms5611_conversion_and_read_adc(uint8_t cmd, uint32_t *
 	status = ms5611_write_command(cmd);
 	// delay conversion depending on resolution
 	
-	// delay_ms( conversion_time[ (cmd & MS5611_CONVERSION_OSR_MASK)/2 ]/1000 );
 	// TODO: try solve this with scheduling
+    //delay_ms( conversion_time[ (cmd & MS5611_CONVERSION_OSR_MASK)/2 ]/1000 );
+    delay_ms(10);
 	if( status != ms5611_status_ok)
 		return status;
 
@@ -377,12 +385,30 @@ enum ms5611_status ms5611_read_temperature_and_pressure( float *temperature, flo
     if (adc_temperature == 0 || adc_pressure == 0)
         return ms5611_status_i2c_transfer_error;
 
+    // 2225DSO-DB001DS
+    enum
+    {
+        Q1 = 15,
+        Q2 = 17,
+        Q3 = 7,
+        Q4 = 5,
+        Q5 = 7,
+        Q6 = 21,
+    };
+    // MS5611
+    // Q5 = 8
+    // Q6 = 23
+    // Q2 = 16
+    // Q4 = 7
+    // Q1 = 15
+    // Q3 = 8
 	// Difference between actual and reference temperature = D2 - Tref
-	dT = (int32_t)adc_temperature - ((int32_t)eeprom_coeff[MS5611_REFERENCE_TEMPERATURE_INDEX] <<8 );
+	dT = (int32_t)adc_temperature - ((int32_t)eeprom_coeff[MS5611_C5] << Q5 );
 	
 	// Actual temperature = 2000 + dT * TEMPSENS
-	TEMP = 2000 + ((int64_t)dT * (int64_t)eeprom_coeff[MS5611_TEMP_COEFF_OF_TEMPERATURE_INDEX] >> 23) ;
+	TEMP = 2000 + ((int64_t)dT * (int64_t)eeprom_coeff[MS5611_C6] >> Q6 ) ;
 	
+    /*
 	// Second order temperature compensation
 	if( TEMP < 2000 )
 	{
@@ -402,19 +428,21 @@ enum ms5611_status ms5611_read_temperature_and_pressure( float *temperature, flo
 		OFF2 = 0 ;
 		SENS2 = 0 ;
 	}
+    */
 	
-	// OFF = OFF_T1 + TCO * dT
-	OFF = ( (int64_t)(eeprom_coeff[MS5611_PRESSURE_OFFSET_INDEX]) << 16 ) + ( ( (int64_t)(eeprom_coeff[MS5611_TEMP_COEFF_OF_PRESSURE_OFFSET_INDEX]) * dT ) >> 7 ) ;
-	OFF -= OFF2 ;
+	// Offset at actual temperature OFF = OFF_T1 + TCO * dT
+	OFF = ( (int64_t)(eeprom_coeff[MS5611_PRESSURE_OFFSET_INDEX]) << Q2 ) + ( ( (int64_t)(eeprom_coeff[MS5611_TEMP_COEFF_OF_PRESSURE_OFFSET_INDEX]) * dT ) >> Q4 ) ;
+	//OFF -= OFF2 ;
 	
 	// Sensitivity at actual temperature = SENS_T1 + TCS * dT
-	SENS = ( (int64_t)eeprom_coeff[MS5611_PRESSURE_SENSITIVITY_INDEX] << 15 ) + ( ((int64_t)eeprom_coeff[MS5611_TEMP_COEFF_OF_PRESSURE_SENSITIVITY_INDEX] * dT) >> 8 ) ;
-	SENS -= SENS2 ;
+	SENS = ( (int64_t)eeprom_coeff[MS5611_PRESSURE_SENSITIVITY_INDEX] << Q1 ) + ( ((int64_t)eeprom_coeff[MS5611_TEMP_COEFF_OF_PRESSURE_SENSITIVITY_INDEX] * dT) >> Q3 ) ;
+	//SENS -= SENS2 ;
 	
 	// Temperature compensated pressure = D1 * SENS - OFF
 	P = ( ( (adc_pressure * SENS) >> 21 ) - OFF ) >> 15 ;
 	
-	*temperature = ( (float)TEMP - T2 ) / 100;
+	//*temperature = ( (float)TEMP - T2 ) / 100;
+	*temperature = ( (float)TEMP ) / 100;
 	*pressure = (float)P / 100;
 	
 	return status;

@@ -112,8 +112,60 @@ static enum ms5611_status ms5611_read_eeprom(void);
 static enum ms5611_status ms5611_conversion_and_read_adc( uint8_t, uint32_t *);
 static bool ms5611_crc_check (uint16_t *n_prom, uint8_t crc);
 
-enum ms5611_resolution_osr ms5611_resolution_osr;
-static uint16_t eeprom_coeff[MS5611_COEFFICIENT_NUMBERS];
+
+enum ms_addr {
+    MS_ADDR_76 = 0x76,
+    MS_ADDR_77 = 0x77,
+};
+
+enum ms_type {
+    TYPE_MS5525DS001,
+    TYPE_MS5611,
+    TYPE_COUNT,
+};
+
+typedef struct {
+    uint8_t Q1;
+    uint8_t Q2;
+    uint8_t Q3;
+    uint8_t Q4;
+    uint8_t Q5;
+    uint8_t Q6;
+} ms_constants_t;
+
+static ms_constants_t constants[] = {
+    [TYPE_MS5525DS001] = {
+        .Q1 = 15,
+        .Q2 = 17,
+        .Q3 = 7,
+        .Q4 = 5,
+        .Q5 = 7,
+        .Q6 = 21,
+    },
+    [TYPE_MS5611]{
+        .Q5 = 8,
+        .Q6 = 23,
+        .Q2 = 16,
+        .Q4 = 7,
+        .Q1 = 15,
+        .Q3 = 8,
+    },
+};
+
+typedef struct ms_sensor {
+    enum ms_addr addr;
+    enum ms5611_resolution_osr ms5611_resolution_osr;
+    enum ms_type type;
+    uint16_t eeprom_coeff[MS5611_COEFFICIENT_NUMBERS];
+} ms_sensor_t;
+
+static ms_sensor_t sensor_s = {
+    .type = TYPE_MS5525DS001,
+    .addr = MS_ADDR_76,
+};
+
+ms_sensor_t * sensor = &sensor_s; // temporary
+
 static uint32_t conversion_time[5] = {	MS5611_CONVERSION_TIME_OSR_256,
 										MS5611_CONVERSION_TIME_OSR_512,
 										MS5611_CONVERSION_TIME_OSR_1024,
@@ -128,7 +180,7 @@ bool ms5611_coeff_read = false;
  */
 void ms5611_init(void)
 {
-	ms5611_resolution_osr = ms5611_resolution_osr_4096;
+	sensor->ms5611_resolution_osr = ms5611_resolution_osr_4096;
     ms5611_read_eeprom();
 }
 
@@ -177,7 +229,7 @@ enum ms5611_status  ms5611_reset(void)
  */
 void ms5611_set_resolution(enum ms5611_resolution_osr res)
 {
-	ms5611_resolution_osr = res;
+	sensor->ms5611_resolution_osr = res;
 	return;
 }
 
@@ -276,12 +328,12 @@ enum ms5611_status ms5611_read_eeprom(void)
 	
 	for( i=0 ; i< MS5611_COEFFICIENT_NUMBERS ; i++)
 	{
-		status = ms5611_read_eeprom_coeff( MS5611_PROM_ADDRESS_READ_ADDRESS_0 + i*2, eeprom_coeff+i);
+		status = ms5611_read_eeprom_coeff( MS5611_PROM_ADDRESS_READ_ADDRESS_0 + i*2, sensor->eeprom_coeff+i);
 		if(status != ms5611_status_ok)
 			return status;
 	}
     
-	if( !ms5611_crc_check( eeprom_coeff, eeprom_coeff[MS5611_CRC_INDEX] & 0x000F ) )
+	if( !ms5611_crc_check( sensor->eeprom_coeff, sensor->eeprom_coeff[MS5611_CRC_INDEX] & 0x000F ) )
 		return ms5611_status_crc_error;
 	
 	ms5611_coeff_read = true;
@@ -359,7 +411,7 @@ enum ms5611_status ms5611_read_temperature_and_pressure( float *temperature, flo
 	enum ms5611_status status = ms5611_status_ok;
 	uint32_t adc_temperature, adc_pressure;
 	int32_t dT, TEMP;
-	int64_t OFF, SENS, P, T2, OFF2, SENS2;
+	int64_t OFF, SENS, P; //, T2, OFF2, SENS2;
 	uint8_t cmd;
 	
 	// If first time adc is requested, get EEPROM coefficients
@@ -369,14 +421,14 @@ enum ms5611_status ms5611_read_temperature_and_pressure( float *temperature, flo
 		return status;
 	
 	// First read temperature
-	cmd = ms5611_resolution_osr*2;
+	cmd = sensor->ms5611_resolution_osr*2;
 	cmd |= MS5611_START_TEMPERATURE_ADC_CONVERSION;
 	status = ms5611_conversion_and_read_adc( cmd, &adc_temperature);
 	if( status != ms5611_status_ok)
 		return status;
 
 	// Now read pressure
-	cmd = ms5611_resolution_osr*2;
+	cmd = sensor->ms5611_resolution_osr*2;
 	cmd |= MS5611_START_PRESSURE_ADC_CONVERSION;
 	status = ms5611_conversion_and_read_adc( cmd, &adc_pressure);
 	if( status != ms5611_status_ok)
@@ -385,28 +437,12 @@ enum ms5611_status ms5611_read_temperature_and_pressure( float *temperature, flo
     if (adc_temperature == 0 || adc_pressure == 0)
         return ms5611_status_i2c_transfer_error;
 
-    // 2225DSO-DB001DS
-    enum
-    {
-        Q1 = 15,
-        Q2 = 17,
-        Q3 = 7,
-        Q4 = 5,
-        Q5 = 7,
-        Q6 = 21,
-    };
-    // MS5611
-    // Q5 = 8
-    // Q6 = 23
-    // Q2 = 16
-    // Q4 = 7
-    // Q1 = 15
-    // Q3 = 8
+    ms_constants_t * c = &constants[sensor->type];
 	// Difference between actual and reference temperature = D2 - Tref
-	dT = (int32_t)adc_temperature - ((int32_t)eeprom_coeff[MS5611_C5] << Q5 );
+	dT = (int32_t)adc_temperature - ((int32_t)sensor->eeprom_coeff[MS5611_C5] << c->Q5 );
 	
 	// Actual temperature = 2000 + dT * TEMPSENS
-	TEMP = 2000 + ((int64_t)dT * (int64_t)eeprom_coeff[MS5611_C6] >> Q6 ) ;
+	TEMP = 2000 + ((int64_t)dT * (int64_t)sensor->eeprom_coeff[MS5611_C6] >> c->Q6 ) ;
 	
     /*
 	// Second order temperature compensation
@@ -431,19 +467,25 @@ enum ms5611_status ms5611_read_temperature_and_pressure( float *temperature, flo
     */
 	
 	// Offset at actual temperature OFF = OFF_T1 + TCO * dT
-	OFF = ( (int64_t)(eeprom_coeff[MS5611_PRESSURE_OFFSET_INDEX]) << Q2 ) + ( ( (int64_t)(eeprom_coeff[MS5611_TEMP_COEFF_OF_PRESSURE_OFFSET_INDEX]) * dT ) >> Q4 ) ;
-	//OFF -= OFF2 ;
+	OFF = ( (int64_t)(sensor->eeprom_coeff[MS5611_C2]) << c->Q2 ) + ( ( (int64_t)(sensor->eeprom_coeff[MS5611_C4]) * dT ) >> c->Q4 ) ;
+	//sensorOFF -= OFF2 ;
 	
 	// Sensitivity at actual temperature = SENS_T1 + TCS * dT
-	SENS = ( (int64_t)eeprom_coeff[MS5611_PRESSURE_SENSITIVITY_INDEX] << Q1 ) + ( ((int64_t)eeprom_coeff[MS5611_TEMP_COEFF_OF_PRESSURE_SENSITIVITY_INDEX] * dT) >> Q3 ) ;
+	SENS = ( (int64_t)sensor->eeprom_coeff[MS5611_C1] << c->Q1 ) + ( ((int64_t)sensor->eeprom_coeff[MS5611_C3] * dT) >> c->Q3 ) ;
 	//SENS -= SENS2 ;
 	
 	// Temperature compensated pressure = D1 * SENS - OFF
 	P = ( ( (adc_pressure * SENS) >> 21 ) - OFF ) >> 15 ;
 	
 	//*temperature = ( (float)TEMP - T2 ) / 100;
+	const float diff_press_PSI = P * 0.0001f;
+    
+    static const float offset_PSI = 0.0504;
+
+	// 1 PSI = 6894.76 Pascals
+    //static const float PSI_to_Pa = 6894.757f;
 	*temperature = ( (float)TEMP ) / 100;
-	*pressure = (float)P / 100;
+	*pressure = diff_press_PSI + offset_PSI;
 	
 	return status;
 }

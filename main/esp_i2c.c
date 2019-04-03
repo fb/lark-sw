@@ -5,7 +5,7 @@
 
 #define I2C_MASTER_TX_BUF_DISABLE  0
 #define I2C_MASTER_RX_BUF_DISABLE  0
-#define I2C_MASTER_FREQ_HZ         100000
+#define I2C_MASTER_FREQ_HZ         400000
 
 #define I2C_TIMEOUT 10
 #define TIMESLICES(x) ((x+portTICK_RATE_MS-1)/portTICK_RATE_MS)
@@ -19,7 +19,6 @@
 
 int i2c_master_port;
 
-#define MUX_ADDR 0x70
 
 void i2c_init(void)
 {
@@ -37,15 +36,6 @@ void i2c_init(void)
 	i2c_driver_install(i2c_master_port, i2c_conf.mode,
 			I2C_MASTER_RX_BUF_DISABLE,
 			I2C_MASTER_TX_BUF_DISABLE, 0);
-
-    i2c_write_byte(MUX_ADDR, 0x06);
-    uint8_t buf[2];
-    i2c_read_bytes(MUX_ADDR, 1, buf);
-    printf("mux: %02X\n", buf[0]);
-
-    i2c_write_byte(0x77, 0xA2);
-    i2c_read_bytes(0x77, 2, buf);
-    printf("u: %u\n", buf[0] << 8 | buf[1]);
 }
 
 esp_err_t i2c_read_bytes(uint8_t addr, size_t length, uint8_t * data)

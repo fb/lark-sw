@@ -34,6 +34,7 @@
 #include "ms5611.h"
 #include "sensor.h"
 #include "vario.h" // vario_feed
+#include "esp_i2c.h"
 
 #define LOG_LOCAL_LEVEL ESP_LOG_VERBOSE
 #include "esp_log.h"
@@ -41,20 +42,21 @@
 #define STACK_SIZE 4096
 #define TAG "sensors: "
 
-
-#define I2C_TEP_ADDR 0x77
-
-#define CONVERSION_BEAT_US 12500
-
+#define CONVERTERSION_BEAT_US 100000
 
 /* Sensor device structs */
 SemaphoreHandle_t timer_semaphore = NULL;
+
 press_temp_t tep_sensor;
 
-void sensor_read_round()
-{
-	//ESP_LOGD(TAG, "tep: %d %d %2.2f %3.3f %5.2f", rawpress, rawtemp, tep_sensor.temp_celsius, tep_sensor.press_mbar, ms5611_calc_altitude(tep_sensor.press_mbar));
-}
+ms_sensor_t sensor1 = {
+    .addr = MS_ADDR_76,
+    .type = TYPE_MS5611,
+};
+ms_sensor_t sensor3 = {
+    .addr = MS_ADDR_76,
+    .type = TYPE_MS5525DS001,
+};
 
 static void sensor_read_timer_callback(void *arg) {
 	xSemaphoreGive(timer_semaphore);
@@ -64,16 +66,72 @@ static void sensor_read_task(void *pvParameter) {
 	/* run main loop */
 	while(1) {
 		if (xSemaphoreTake(timer_semaphore, portMAX_DELAY)!= pdTRUE)
-			ESP_LOGW(TAG, "semaphore failed!\n");
-		sensor_read_round();
-		//sensor_update_output();
-	}
+            ESP_LOGW(TAG, "semaphore failed!\n");
+    }
+
 }
 
+enum
+{
+//    MS_ADDR_76          = 0x76,
+    MS_CMD_RESET        = 0x1E,
+    MS_CMD_READ_ADC     = 0x00,
+    MS_CMD_CONVERT_D1   = 0x48,
+    MS_CMD_CONVERT_D2   = 0x58,
+    MS_CMD_READ_PROM_A0 = 0xA0,
+};
 
+static uint32_t read_adc()
+{
+    i2c_write_byte(MS_ADDR_76, MS_CMD_READ_ADC);
+    uint8_t buf[3];
+    i2c_read_bytes(MS_ADDR_76, 3, buf);
+    return buf[2] | buf[1] << 8 | buf[0] << 16;
+}
 
 int sensor_read_init(void) {
 	vario_init();
+
+    const uint8_t a_mux = 0x70;
+
+    for(int channel = 0; channel < 3; channel++)
+    {
+        uint8_t buf[4];
+
+        i2c_write_byte(a_mux, 4 + channel);
+        i2c_read_bytes(a_mux, 1, buf);
+
+        uint16_t C[8];
+        for(int i = 0; i < 8; i++)
+        {
+            i2c_write_byte(MS_ADDR_76, MS_CMD_READ_PROM_A0 + 2*i);
+            i2c_read_bytes(MS_ADDR_76, 2, buf);
+
+            C[i] = buf[1] | (buf[0] << 8);
+
+            printf("%d %02x %u\n", channel, i*2, C[i]); 
+        }
+
+        for(int i = 0; i < 8; i++)
+        {
+            i2c_write_byte(MS_ADDR_76, MS_CMD_CONVERT_D1); // pressure @ OSR 4096
+
+            vTaskDelay(20 / portTICK_PERIOD_MS);
+
+            uint32_t adc = read_adc();
+            printf("%d D0 %u\n", channel, adc);
+
+            i2c_write_byte(MS_ADDR_76, MS_CMD_CONVERT_D2); // temp @ OSR 4096
+            vTaskDelay(20 / portTICK_PERIOD_MS);
+
+            adc = read_adc();
+
+
+            printf("%d D1 %u\n", channel, adc);
+            //printf("#%d d1 %08x\n", channel, (uint32_t)*buf);
+        }
+        printf("\n");
+    }
 
 	/* create read semaphore */
 	timer_semaphore = xSemaphoreCreateBinary();
@@ -87,7 +145,7 @@ int sensor_read_init(void) {
 		.dispatch_method = ESP_TIMER_TASK
 	};
 	esp_timer_create(&timer_conf, &read_timer);
-	esp_timer_start_periodic(read_timer, CONVERSION_BEAT_US);
+	esp_timer_start_periodic(read_timer, CONVERTERSION_BEAT_US);
 
 	return ESP_OK;
 }

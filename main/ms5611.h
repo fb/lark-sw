@@ -97,5 +97,6 @@ void ms5611_init(ms_sensor_t *);
  *       - ms5611_status_crc_error : CRC check error on on the PROM coefficients
  */
 enum ms5611_status ms5611_read_temperature_and_pressure(ms_sensor_t *, float *, float *);
+bool ms5611_crc_check (uint16_t *n_prom);
 
 #endif /* ms5611_H_INCLUDED */

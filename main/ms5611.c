@@ -123,7 +123,6 @@ static enum ms5611_status ms5611_write_command(ms_sensor_t * sensor, uint8_t);
 static enum ms5611_status ms5611_read_eeprom_coeff(ms_sensor_t * sensor, uint8_t, uint16_t*);
 static enum ms5611_status ms5611_read_eeprom(ms_sensor_t * sensor);
 static enum ms5611_status ms5611_conversion_and_read_adc(ms_sensor_t * sensor_s, uint8_t, uint32_t *);
-static bool ms5611_crc_check (uint16_t *n_prom, uint8_t crc);
 
 typedef struct {
     uint8_t Q1;
@@ -302,7 +301,7 @@ enum ms5611_status ms5611_read_eeprom(ms_sensor_t * sensor)
 			return status;
 	}
     
-	if( !ms5611_crc_check( sensor->eeprom_coeff, sensor->eeprom_coeff[MS5611_CRC_INDEX] & 0x000F ) )
+	if( !ms5611_crc_check( sensor->eeprom_coeff ) )
 		return ms5611_status_crc_error;
 	
 	return ms5611_status_ok;
@@ -466,7 +465,7 @@ enum ms5611_status ms5611_read_temperature_and_pressure(ms_sensor_t * sensor, fl
  *
  * \return bool : TRUE if CRC is OK, FALSE if KO
  */
-bool ms5611_crc_check (uint16_t *n_prom, uint8_t crc)
+bool ms5611_crc_check (uint16_t *n_prom)
 {
     uint8_t cnt, n_bit; 
     uint16_t n_rem; 
@@ -491,7 +490,7 @@ bool ms5611_crc_check (uint16_t *n_prom, uint8_t crc)
     n_prom[7] = crc_read;
     n_rem ^= 0x00;
         
-	return  ( n_rem == crc );
+	return  ( n_rem == (n_prom[7] & 0x000F) );
 }
 
 #ifdef __cplusplus

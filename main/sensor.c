@@ -89,6 +89,19 @@ static uint32_t read_adc()
     return buf[2] | buf[1] << 8 | buf[0] << 16;
 }
 
+static void read_coeffs(uint16_t C[8])
+{
+    for(int i = 0; i < 8; i++)
+    {
+        uint8_t buf[2];
+        i2c_write_byte(MS_ADDR_76, MS_CMD_READ_PROM_A0 + 2*i);
+        i2c_read_bytes(MS_ADDR_76, 2, buf);
+
+        C[i] = buf[1] | (buf[0] << 8);
+
+    }
+}
+
 int sensor_read_init(void) {
 	vario_init();
 
@@ -102,15 +115,11 @@ int sensor_read_init(void) {
         i2c_read_bytes(a_mux, 1, buf);
 
         uint16_t C[8];
-        for(int i = 0; i < 8; i++)
-        {
-            i2c_write_byte(MS_ADDR_76, MS_CMD_READ_PROM_A0 + 2*i);
-            i2c_read_bytes(MS_ADDR_76, 2, buf);
+        read_coeffs(C);
+        printf("# CRC check: %d\n", ms5611_crc_check(C) == true);
 
-            C[i] = buf[1] | (buf[0] << 8);
-
+        for(int i=0; i < 8; i++)
             printf("%d %02x %u\n", channel, i*2, C[i]); 
-        }
 
         for(int i = 0; i < 8; i++)
         {

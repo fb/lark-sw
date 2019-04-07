@@ -102,12 +102,13 @@ static void read_coeffs(uint16_t C[8])
     }
 }
 
+
 int sensor_read_init(void) {
 	vario_init();
 
     const uint8_t a_mux = 0x70;
 
-    for(int channel = 0; channel < 3; channel++)
+    for(int channel = 0; channel < 1; channel++)
     {
         uint8_t buf[4];
 
@@ -118,26 +119,24 @@ int sensor_read_init(void) {
         read_coeffs(C);
         printf("# CRC check: %d\n", ms5611_crc_check(C) == true);
 
-        for(int i=0; i < 8; i++)
-            printf("%d %02x %u\n", channel, i*2, C[i]); 
-
-        for(int i = 0; i < 8; i++)
+        for(int i = 0; i < 64; i++)
         {
             i2c_write_byte(MS_ADDR_76, MS_CMD_CONVERT_D1); // pressure @ OSR 4096
 
             vTaskDelay(20 / portTICK_PERIOD_MS);
 
-            uint32_t adc = read_adc();
-            printf("%d D0 %u\n", channel, adc);
+            uint32_t D1, D2;
+
+            D1 = read_adc();
 
             i2c_write_byte(MS_ADDR_76, MS_CMD_CONVERT_D2); // temp @ OSR 4096
             vTaskDelay(20 / portTICK_PERIOD_MS);
 
-            adc = read_adc();
+            D2 = read_adc();
 
-
-            printf("%d D1 %u\n", channel, adc);
-            //printf("#%d d1 %08x\n", channel, (uint32_t)*buf);
+            int32_t dT = calculate_dT(D2, C);
+            int32_t P = calculate_P(D1, dT, C);
+            printf("%d %u %u %d %d\n", channel, D1, D2, dT, P);
         }
         printf("\n");
     }

@@ -152,6 +152,48 @@ static ms_constants_t constants[] = {
     },
 };
 
+static uint8_t Q[7] = {
+    [1] = 15,
+    [2] = 16,
+    [3] = 8,
+    [4] = 7,
+    [5] = 8,
+    [6] = 23,
+};
+
+int32_t calculate_dT(uint32_t D2, uint16_t * C)
+{
+    // dT = D2 - C5 * 2**Q5
+    int32_t dT = - (C[5] << Q[5]);
+    return dT + D2;
+}
+
+int64_t calculate_P_noshift(uint32_t D1, int32_t dT, uint16_t * C)
+{
+    // OFF = C2 * 2**Q2 + (C4 * dT) / 2**Q4
+    int64_t OFF = (int64_t)C[2] << 16;
+    OFF += (C[4] * dT) >> 7;
+
+    // SENS = C1 * 2**Q1 + (C3 * dT) / 2**Q3
+    int64_t SENS = (int64_t)C[1] << Q[1];
+    SENS += (C[3] * dT) >> Q[3];
+
+    // P = (D1 * SENS / 2**21 - OFF) / 2**15
+    int64_t P = (D1 * SENS) >> 21;
+    P -= OFF;
+    return P;
+}
+
+uint32_t calculate_P(uint32_t D1, int32_t dT, uint16_t * C)
+{
+    return calculate_P_noshift(D1, dT, C) >> 15;
+}
+
+float calculate_P_float(uint32_t D1, int32_t dT, uint16_t *C)
+{
+    return calculate_P_noshift(D1, dT, C) * (0.01 / (1 << 15));
+}
+
 /**
  * \brief Reset the MS5611 device
  *

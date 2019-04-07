@@ -99,4 +99,8 @@ void ms5611_init(ms_sensor_t *);
 enum ms5611_status ms5611_read_temperature_and_pressure(ms_sensor_t *, float *, float *);
 bool ms5611_crc_check (uint16_t *n_prom);
 
+uint32_t calculate_P(uint32_t D1, int32_t dT, uint16_t * C);
+float calculate_P_float(uint32_t D1, int32_t dT, uint16_t * C);
+int32_t calculate_dT(uint32_t D2, uint16_t * C);
+
 #endif /* ms5611_H_INCLUDED */

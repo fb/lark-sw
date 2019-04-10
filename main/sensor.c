@@ -42,10 +42,12 @@
 #define STACK_SIZE 4096
 #define TAG "sensors: "
 
-#define CONVERTERSION_BEAT_US 100000
+#define CONVERTERSION_BEAT_US 50000
 
 /* Sensor device structs */
 SemaphoreHandle_t timer_semaphore = NULL;
+
+uint16_t C[8]; // temporary coeff store
 
 press_temp_t tep_sensor;
 
@@ -60,15 +62,6 @@ ms_sensor_t sensor3 = {
 
 static void sensor_read_timer_callback(void *arg) {
 	xSemaphoreGive(timer_semaphore);
-}
-
-static void sensor_read_task(void *pvParameter) {
-	/* run main loop */
-	while(1) {
-		if (xSemaphoreTake(timer_semaphore, portMAX_DELAY)!= pdTRUE)
-            ESP_LOGW(TAG, "semaphore failed!\n");
-    }
-
 }
 
 enum
@@ -102,6 +95,32 @@ static void read_coeffs(uint16_t C[8])
     }
 }
 
+static void sensor_read_task(void *pvParameter) {
+	/* run main loop */
+	while(1) {
+		if (xSemaphoreTake(timer_semaphore, portMAX_DELAY)!= pdTRUE)
+            ESP_LOGW(TAG, "semaphore failed!\n");
+
+        static int channel = 0;
+
+        i2c_write_byte(MS_ADDR_76, MS_CMD_CONVERT_D1); // pressure @ OSR 4096
+
+        vTaskDelay(20 / portTICK_PERIOD_MS);
+
+        uint32_t D1, D2;
+
+        D1 = read_adc();
+
+        i2c_write_byte(MS_ADDR_76, MS_CMD_CONVERT_D2); // temp @ OSR 4096
+        vTaskDelay(20 / portTICK_PERIOD_MS);
+
+        D2 = read_adc();
+
+        int32_t dT = calculate_dT(D2, C);
+        int32_t P = calculate_P(D1, dT, C);
+        printf("%d %u %u %d %d\n", channel, D1, D2, dT, P);
+    }
+}
 
 int sensor_read_init(void) {
 	vario_init();
@@ -115,31 +134,10 @@ int sensor_read_init(void) {
         i2c_write_byte(a_mux, 4 + channel);
         i2c_read_bytes(a_mux, 1, buf);
 
-        uint16_t C[8];
         read_coeffs(C);
         printf("# CRC check: %d\n", ms5611_crc_check(C) == true);
-
-        for(int i = 0; i < 64; i++)
-        {
-            i2c_write_byte(MS_ADDR_76, MS_CMD_CONVERT_D1); // pressure @ OSR 4096
-
-            vTaskDelay(20 / portTICK_PERIOD_MS);
-
-            uint32_t D1, D2;
-
-            D1 = read_adc();
-
-            i2c_write_byte(MS_ADDR_76, MS_CMD_CONVERT_D2); // temp @ OSR 4096
-            vTaskDelay(20 / portTICK_PERIOD_MS);
-
-            D2 = read_adc();
-
-            int32_t dT = calculate_dT(D2, C);
-            int32_t P = calculate_P(D1, dT, C);
-            printf("%d %u %u %d %d\n", channel, D1, D2, dT, P);
-        }
-        printf("\n");
     }
+
 
 	/* create read semaphore */
 	timer_semaphore = xSemaphoreCreateBinary();

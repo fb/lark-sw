@@ -42,22 +42,13 @@
 #define STACK_SIZE 4096
 #define TAG "sensors: "
 
-#define CONVERTERSION_BEAT_US 20000
+#define CONVERTERSION_BEAT_US 10000
 
 /* Sensor device structs */
 SemaphoreHandle_t timer_semaphore = NULL;
 
 
 press_temp_t tep_sensor;
-
-ms_sensor_t sensor1 = {
-    .addr = MS_ADDR_76,
-    .type = TYPE_MS5611,
-};
-ms_sensor_t sensor3 = {
-    .addr = MS_ADDR_76,
-    .type = TYPE_MS5525DS001,
-};
 
 static void sensor_read_timer_callback(void *arg) {
 	xSemaphoreGive(timer_semaphore);
@@ -95,41 +86,44 @@ static void read_coeffs(uint16_t C[8])
 }
 
 
-// Sensor FSM
-void sensor_run()
+typedef enum
 {
-    typedef enum
-    {
-        INIT,
-        POLL_D1,
-        POLL_D2,
-    } sensor_state_t;
+    INIT,
+    POLL_D1,
+    POLL_D2,
+} sensor_state_t;
 
-    static sensor_state_t state = INIT;
-    static int channel = 0;
-    static uint16_t C[8]; // temporary coeff store
-    static uint32_t D1, D2;
+typedef struct
+{
+    sensor_state_t state;
+    int channel;
+    uint16_t C[8];
+    uint32_t D1, D2;
+} sensor_t;
 
-    i2c_write_byte(0x70, 4 + channel); // activate my channel on MUX
+// Sensor FSM
+void sensor_run(sensor_t * sensor)
+{
+    i2c_write_byte(0x70, 4 + sensor->channel); // activate my channel on MUX
 
-    switch(state)
+    switch(sensor->state)
     {
         case INIT:
-            read_coeffs(C);
-            printf("# CRC check: %d\n", ms5611_crc_check(C) == true);
-            state = POLL_D1;
+            read_coeffs(sensor->C);
+            printf("# CRC check: %d\n", ms5611_crc_check(sensor->C) == true);
+            sensor->state = POLL_D1;
         case POLL_D2:
-            D1 = read_adc();
+            sensor->D1 = read_adc();
             i2c_write_byte(MS_ADDR_76, MS_CMD_CONVERT_D2); // temperature @ OSR 4096
-            int32_t dT = calculate_dT(D2, C);
-            int32_t P = calculate_P(D1, dT, C);
-            printf("%d %u %u %d %d\n", channel, D1, D2, dT, P);
-            state = POLL_D1;
+            int32_t dT = calculate_dT(sensor->D2, sensor->C);
+            int32_t P = calculate_P(sensor->D1, dT, sensor->C);
+            printf("%d %u %u %d %d\n", sensor->channel, sensor->D1, sensor->D2, dT, P);
+            sensor->state = POLL_D1;
             break;
         case POLL_D1:
-            D2 = read_adc();
+            sensor->D2 = read_adc();
             i2c_write_byte(MS_ADDR_76, MS_CMD_CONVERT_D1); // pressure @ OSR 4096
-            state = POLL_D2;
+            sensor->state = POLL_D2;
             break;
         default:
             printf("FSM error\n");
@@ -142,7 +136,27 @@ static void sensor_read_task(void *pvParameter) {
 		if (xSemaphoreTake(timer_semaphore, portMAX_DELAY)!= pdTRUE)
             ESP_LOGW(TAG, "semaphore failed!\n");
 
-        sensor_run();
+        static sensor_t sensor1 =
+        {
+            .state = INIT,
+            .channel = 0,
+        };
+
+        static sensor_t sensor2 =
+        {
+            .state = INIT,
+            .channel = 1,
+        };
+
+        static sensor_t sensor3 =
+        {
+            .state = INIT,
+            .channel = 2,
+        };
+
+        sensor_run(&sensor1);
+        sensor_run(&sensor2);
+        sensor_run(&sensor3);
     }
 }
 

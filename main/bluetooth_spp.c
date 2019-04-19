@@ -12,6 +12,8 @@
 #include <stdio.h>
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include "freertos/semphr.h"
+
 #include "esp_log.h"
 #include "esp_bt.h"
 #include "esp_bt_main.h"
@@ -22,12 +24,18 @@
 #include "time.h"
 #include "sys/time.h"
 
+#include "sensor.h"
+#include "semaphores.h"
+
 #define SPP_TAG "SPP_ACCEPTOR_DEMO"
 #define SPP_SERVER_NAME "SPP_SERVER"
 #define EXCAMPLE_DEVICE_NAME "lark-vario"
 #define SPP_SHOW_DATA 0
-#define SPP_SHOW_SPEED 1
+#define SPP_SHOW_SPEED 0
 #define SPP_SHOW_MODE SPP_SHOW_SPEED    /*Choose show mode: show data or speed*/
+
+SemaphoreHandle_t bt_feed_semaphore = NULL;
+static uint32_t bt_handle = 0;
 
 static const esp_spp_mode_t esp_spp_mode = ESP_SPP_MODE_CB;
 
@@ -95,6 +103,7 @@ static void esp_spp_cb(esp_spp_cb_event_t event, esp_spp_cb_param_t *param)
     case ESP_SPP_SRV_OPEN_EVT:
         ESP_LOGI(SPP_TAG, "ESP_SPP_SRV_OPEN_EVT");
         gettimeofday(&time_old, NULL);
+        bt_handle = param->srv_open.handle;
         break;
     default:
         break;
@@ -152,6 +161,28 @@ void esp_bt_gap_cb(esp_bt_gap_cb_event_t event, esp_bt_gap_cb_param_t *param)
     return;
 }
 
+static void bluetooth_task(void *pvParameter)
+{
+    while(1)
+    {
+        if (xSemaphoreTake(bt_feed_semaphore, portMAX_DELAY)!= pdTRUE)
+        {
+            vTaskDelay(100/portTICK_PERIOD_MS);
+        }
+
+        if(bt_handle == 0)
+            continue;
+
+        extern char nmea_sentence[256];
+        uint8_t buffer[256];
+
+        memset(buffer, 0, sizeof(buffer));
+        memcpy(buffer, nmea_sentence, strlen(nmea_sentence));
+
+        esp_spp_write(bt_handle, strlen((char*)buffer), buffer);
+    }
+}
+
 void bluetooth_init()
 {
     ESP_ERROR_CHECK(esp_bt_controller_mem_release(ESP_BT_MODE_BLE));
@@ -207,5 +238,9 @@ void bluetooth_init()
     esp_bt_pin_type_t pin_type = ESP_BT_PIN_TYPE_VARIABLE;
     esp_bt_pin_code_t pin_code;
     esp_bt_gap_set_pin(pin_type, 0, pin_code);
+
+	bt_feed_semaphore = xSemaphoreCreateBinary();
+
+	xTaskCreate(&bluetooth_task, "bluetooth_task", 4096, NULL, 6, NULL);
 }
 

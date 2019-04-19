@@ -68,6 +68,7 @@ void app_main(void ) {
 	audio_feed_semaphore = xSemaphoreCreateBinary();
 
 	bluetooth_init();
+	xTaskCreate(&networking_task, "networking_task", STACK_SIZE, NULL, 4, NULL);
 
 	printf("Running 1\n");
 	sensor_read_init();
@@ -75,7 +76,6 @@ void app_main(void ) {
     nmea_mux_init();
 	//audiovario_start();
 
-	xTaskCreate(&networking_task, "networking_task", STACK_SIZE, NULL, 4, NULL);
 	xTaskCreate(&control_task, "control_task", STACK_SIZE, NULL, 4, NULL);
 }
 

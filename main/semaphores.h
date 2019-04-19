@@ -23,5 +23,6 @@
 extern SemaphoreHandle_t net_feed_semaphore; 
 extern SemaphoreHandle_t audio_feed_semaphore;
 extern SemaphoreHandle_t sensor_event_semaphore;
+extern SemaphoreHandle_t bt_feed_semaphore;
 
 #endif // SEMAPHORES_H

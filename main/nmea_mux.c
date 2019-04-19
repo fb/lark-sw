@@ -47,6 +47,7 @@ static void nmea_mux_task(void *pvParameter) {
         {
             POV_sentence_float(nmea_sentence, 'P', sensor_event.value);
             xSemaphoreGive(net_feed_semaphore);
+            xSemaphoreGive(bt_feed_semaphore);
         }
     }
 }

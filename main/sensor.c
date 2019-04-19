@@ -44,11 +44,10 @@
 
 #define CONVERTERSION_BEAT_US 10000
 
-/* Sensor device structs */
 SemaphoreHandle_t timer_semaphore = NULL;
+SemaphoreHandle_t sensor_event_semaphore = NULL;
 
-
-press_temp_t tep_sensor;
+sensor_event_t sensor_event;
 
 static void sensor_read_timer_callback(void *arg) {
 	xSemaphoreGive(timer_semaphore);
@@ -85,7 +84,6 @@ static void read_coeffs(uint16_t C[8])
     }
 }
 
-
 typedef enum
 {
     INIT,
@@ -102,8 +100,9 @@ typedef struct
 } sensor_t;
 
 // Sensor FSM
-void sensor_run(sensor_t * sensor)
+sensor_event_t sensor_run(sensor_t * sensor)
 {
+    sensor_event_t event = { .type = EV_NONE };
     i2c_write_byte(0x70, 4 + sensor->channel); // activate my channel on MUX
 
     switch(sensor->state)
@@ -119,6 +118,8 @@ void sensor_run(sensor_t * sensor)
             int32_t P = calculate_P(sensor->D1, dT, sensor->C);
             printf("%d %u %u %d %d\n", sensor->channel, sensor->D1, sensor->D2, dT, P);
             sensor->state = POLL_D1;
+            event.type = EV_P1;
+            event.value = P / 100.0f;
             break;
         case POLL_D1:
             sensor->D2 = read_adc();
@@ -128,14 +129,13 @@ void sensor_run(sensor_t * sensor)
         default:
             printf("FSM error\n");
     }
+
+    return event;
 }
 
 static void sensor_read_task(void *pvParameter) {
 	/* run main loop */
 	while(1) {
-		if (xSemaphoreTake(timer_semaphore, portMAX_DELAY)!= pdTRUE)
-            ESP_LOGW(TAG, "semaphore failed!\n");
-
         static sensor_t sensor1 =
         {
             .state = INIT,
@@ -154,9 +154,36 @@ static void sensor_read_task(void *pvParameter) {
             .channel = 2,
         };
 
-        sensor_run(&sensor1);
+		if (xSemaphoreTake(timer_semaphore, portMAX_DELAY)!= pdTRUE)
+            ESP_LOGW(TAG, "semaphore failed!\n");
+
+        /* run sensor FSMs */
+        sensor_event_t ev = sensor_run(&sensor1);
         sensor_run(&sensor2);
         sensor_run(&sensor3);
+
+        /* filter sensor data */
+
+        static float p1_hPa = 1013.0f;
+        static int p1_count = 0;
+        if(ev.type == EV_P1) // new p1 data available
+        {
+            /* exponential smoothing */
+            float p = ev.value;
+            const float alpha = .8;
+            p1_hPa = alpha * p1_hPa  + (1 - alpha) * p;
+            p1_count--;
+            if(p1_count <= 0)
+            {
+                p1_count = 25; // this translates to 50 Hz / 25 = 2 Hz
+
+                // publish the filtered value
+                sensor_event.type = EV_Pstat;
+                sensor_event.value = p1_hPa;
+                printf("give\n");
+                xSemaphoreGive(sensor_event_semaphore);
+            }
+        }
     }
 }
 
@@ -165,6 +192,7 @@ int sensor_read_init(void) {
 
 	/* create read semaphore */
 	timer_semaphore = xSemaphoreCreateBinary();
+	sensor_event_semaphore = xSemaphoreCreateBinary();
 
 	/* create read task */
 	xTaskCreate(&sensor_read_task, "sensor_read_task", STACK_SIZE, NULL, 6, NULL);

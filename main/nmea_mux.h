@@ -1,5 +1,6 @@
-/* Lark TE vario computer
- * Copyright (C) 2014 The LarkVario project
+/* Lark sensor module
+ * Copyright (C) 2018 Tomas Hlavacek (tomas.hlavacek@akaflieg.tu-darmstadt.de)
+ * Copyright (C) 2018 Fabian Bartschke
  *
  * This file is part of Lark.
  *
@@ -17,11 +18,9 @@
  * along with Lark.  If not, see <http://www.gnu.org/licenses/>.
  */
 
-#ifndef SEMAPHORES_H
-#define SEMAPHORES_H
+#ifndef NMEA_MUX_H_
+#define NMEA_MUX_H_
 
-extern SemaphoreHandle_t net_feed_semaphore; 
-extern SemaphoreHandle_t audio_feed_semaphore;
-extern SemaphoreHandle_t sensor_event_semaphore;
+int nmea_mux_init(void);
 
-#endif // SEMAPHORES_H
+#endif

@@ -37,7 +37,7 @@
 #include "net.h"
 #include "semaphores.h"
 #include "sensor.h"
-#include "vario.h"
+#include "nmea_mux.h"
 
 
 
@@ -72,6 +72,7 @@ void app_main(void ) {
 	printf("Running 1\n");
 	sensor_read_init();
 	printf("Running 2\n");
+    nmea_mux_init();
 	//audiovario_start();
 
 	xTaskCreate(&networking_task, "networking_task", STACK_SIZE, NULL, 4, NULL);

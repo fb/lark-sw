@@ -44,7 +44,6 @@
 #define STACK_SIZE 4096
 
 extern float vario_val;
-extern press_temp_t tep_sensor;
 
 
 static int get_socket_error_code(int socket)
@@ -156,11 +155,11 @@ static void net_tx_task(void *pvParameters) {
 			vTaskDelay(100/portTICK_PERIOD_MS);
 		}
 
-		memset(databuff, 0, PKTSIZE * sizeof(char));
-		//sprintf(databuff, "%f\n", vario_val);
-		//Compose_Pressure_POV_fast(databuff, vario_val);
-        memcpy(databuff, (char*)&tep_sensor, sizeof(tep_sensor));
+		//memset(databuff, 0, PKTSIZE * sizeof(char));
+        // send data here
+        //memcpy(databuff, (char*)&tep_sensor, sizeof(tep_sensor));
 
+        /*
 		for (int i=0; i<LARK_MAX_STA_CONN; i++) {
 			if (client_sockets[i] >= 0) {
 				int len = send(client_sockets[i], databuff, sizeof(tep_sensor), 0);
@@ -173,6 +172,7 @@ static void net_tx_task(void *pvParameters) {
 				}
 			}
 		}
+        */
 	}
 
 	free(databuff);

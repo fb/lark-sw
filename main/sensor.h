@@ -23,13 +23,20 @@
 
 #include <stdint.h>
 
+typedef enum
+{
+    EV_NONE,
+    EV_P1,
+    EV_P2,
+    EV_P3,
+    EV_Pstat,
+} sensor_event_type_t;
+
 typedef struct
 {
-    uint16_t header;
-    uint16_t time;
-    float press_mbar;
-    float temp_celsius;
-} press_temp_t;
+    sensor_event_type_t type;
+    float value;
+} sensor_event_t;
 
 int sensor_read_init(void);
 

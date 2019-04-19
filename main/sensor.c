@@ -97,12 +97,12 @@ typedef struct
     int channel;
     uint16_t C[8];
     uint32_t D1, D2;
+    float value;
 } sensor_t;
 
 // Sensor FSM
-sensor_event_t sensor_run(sensor_t * sensor)
+bool sensor_run(sensor_t * sensor)
 {
-    sensor_event_t event = { .type = EV_NONE };
     i2c_write_byte(0x70, 4 + sensor->channel); // activate my channel on MUX
 
     switch(sensor->state)
@@ -116,10 +116,11 @@ sensor_event_t sensor_run(sensor_t * sensor)
             i2c_write_byte(MS_ADDR_76, MS_CMD_CONVERT_D2); // temperature @ OSR 4096
             int32_t dT = calculate_dT(sensor->D2, sensor->C);
             int32_t P = calculate_P(sensor->D1, dT, sensor->C);
-            printf("%d %u %u %d %d\n", sensor->channel, sensor->D1, sensor->D2, dT, P);
+            //printf("%d %u %u %d %d\n", sensor->channel, sensor->D1, sensor->D2, dT, P);
+            printf("%d %d\n", sensor->channel, P);
             sensor->state = POLL_D1;
-            event.type = EV_P1;
-            event.value = P / 100.0f;
+            sensor->value = P / 100.0f;
+            return true;
             break;
         case POLL_D1:
             sensor->D2 = read_adc();
@@ -130,7 +131,12 @@ sensor_event_t sensor_run(sensor_t * sensor)
             printf("FSM error\n");
     }
 
-    return event;
+    return false;
+}
+
+bool sensor_valid(sensor_t * sensor)
+{
+    return sensor->value > 200 && sensor->value < 1200;
 }
 
 static void sensor_read_task(void *pvParameter) {
@@ -158,18 +164,18 @@ static void sensor_read_task(void *pvParameter) {
             ESP_LOGW(TAG, "semaphore failed!\n");
 
         /* run sensor FSMs */
-        sensor_event_t ev = sensor_run(&sensor1);
-        sensor_run(&sensor2);
+        bool new_s1 = sensor_run(&sensor1);
+        bool new_s2 = sensor_run(&sensor2);
         sensor_run(&sensor3);
 
         /* filter sensor data */
 
         static float p1_hPa = 1013.0f;
         static int p1_count = 0;
-        if(ev.type == EV_P1) // new p1 data available
+        if(new_s1 == true && sensor_valid(&sensor1)) // new p1 data available
         {
             /* exponential smoothing */
-            float p = ev.value;
+            float p = sensor1.value;
             const float alpha = .8;
             p1_hPa = alpha * p1_hPa  + (1 - alpha) * p;
             p1_count--;
@@ -180,6 +186,22 @@ static void sensor_read_task(void *pvParameter) {
                 // publish the filtered value
                 sensor_event.type = EV_Pstat;
                 sensor_event.value = p1_hPa;
+                xSemaphoreGive(sensor_event_semaphore);
+            }
+        }
+
+        static int p2_count = 5;
+        if(new_s2 == true && sensor_valid(&sensor2))
+        {
+            vario_update(sensor2.value, 1 / 50.0);
+            p2_count--;
+
+            if(p2_count <= 0)
+            {
+                p2_count = 25;
+
+                sensor_event.type = EV_Pte;
+                sensor_event.value = vario_get_tek();
                 xSemaphoreGive(sensor_event_semaphore);
             }
         }

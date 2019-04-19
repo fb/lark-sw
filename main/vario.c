@@ -83,7 +83,7 @@ static void KalmanFiler1d_update(t_kalmanfilter1d* filter, float z_abs, float va
 	filter->p_abs_vel_ -= filter->p_abs_vel_ * k_abs;
 	filter->p_abs_abs_ -= filter->p_abs_abs_ * k_abs;
 
-    ESP_LOGD(TAG, "%f %f %f", z_abs, filter->x_abs_, filter->x_vel_);
+    //ESP_LOGD(TAG, "%f %f %f", z_abs, filter->x_abs_, filter->x_vel_);
 }
 
 static void KalmanFilter1d_reset(t_kalmanfilter1d* filter)
@@ -113,12 +113,13 @@ void vario_init()
     KalmanFilter1d_reset(&vkf);
 }
 
-void vario_update(float pte_hectopascal, float var, float dt)
+void vario_update(float pte_hectopascal, float dt)
 {
+    const float var = 0.25;
     KalmanFiler1d_update(&vkf, pte_hectopascal, var, dt);
 }
 
-float vario_get_d_te()
+float vario_get_tek()
 {
     return ComputeVario(vkf.x_abs_, vkf.x_vel_);
 }

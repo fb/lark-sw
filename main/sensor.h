@@ -26,10 +26,8 @@
 typedef enum
 {
     EV_NONE,
-    EV_P1,
-    EV_P2,
-    EV_P3,
     EV_Pstat,
+    EV_Pte,
 } sensor_event_type_t;
 
 typedef struct

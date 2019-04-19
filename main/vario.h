@@ -21,7 +21,7 @@
 #define VARIO_H_
 
 void vario_init();
-void vario_update(float, float, float);
-float vario_get_d_te();
+void vario_update(float, float);
+float vario_get_tek();
 
 #endif

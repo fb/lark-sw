@@ -185,7 +185,7 @@ int Compose_Voltage_POV(char *sentence, float voltage)
 
 void POV_sentence_float(char * sentence, char key, float value)
 {
-    int length = sprintf(sentence, "$POV,%c,%5g", key, value);
+    int length = sprintf(sentence, "$POV,%c,%1.2f", key, value);
     // Calculate NMEA checksum and add to string
     sprintf(sentence + length, "*%02X\n", NMEA_checksum(sentence));
 }

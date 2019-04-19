@@ -182,6 +182,14 @@ int Compose_Voltage_POV(char *sentence, float voltage)
 	return (success);
 }
 
+
+void POV_sentence_float(char * sentence, char key, float value)
+{
+    int length = sprintf(sentence, "$POV,%c,%5g", key, value);
+    // Calculate NMEA checksum and add to string
+    sprintf(sentence + length, "*%02X\n", NMEA_checksum(sentence));
+}
+
 /**
 * @brief Implements the NMEA Checksum
 * @param char* NMEA string
@@ -190,7 +198,6 @@ int Compose_Voltage_POV(char *sentence, float voltage)
 * The NMEA Checksum is calulated over the NMEA string between $ and *\n
 * The checksum is a hexadecimal number representing the XOR of all bytes
 */
-
 unsigned char NMEA_checksum(char *string)
 {
   unsigned char value=0;

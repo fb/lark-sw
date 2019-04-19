@@ -149,34 +149,33 @@ SemaphoreHandle_t net_feed_semaphore = NULL;
 static void net_tx_task(void *pvParameters) {
 	char *databuff = (char *)malloc(PKTSIZE * sizeof(char));
 
-	while (1) {
-		if (xSemaphoreTake(net_feed_semaphore, portMAX_DELAY)!= pdTRUE) {
-			ESP_LOGW(TAG, "semaphore failed!\n");
-			vTaskDelay(100/portTICK_PERIOD_MS);
-		}
+    while (1) {
+        if (xSemaphoreTake(net_feed_semaphore, portMAX_DELAY)!= pdTRUE) {
+            ESP_LOGW(TAG, "semaphore failed!\n");
+            vTaskDelay(100/portTICK_PERIOD_MS);
+        }
 
-		//memset(databuff, 0, PKTSIZE * sizeof(char));
-        // send data here
-        //memcpy(databuff, (char*)&tep_sensor, sizeof(tep_sensor));
+        extern char nmea_sentence[256];
 
-        /*
-		for (int i=0; i<LARK_MAX_STA_CONN; i++) {
-			if (client_sockets[i] >= 0) {
-				int len = send(client_sockets[i], databuff, sizeof(tep_sensor), 0);
-				if (len <= 0) {
-					int err = get_socket_error_code(client_sockets[i]);
-					if (err != ENOMEM)
-						show_socket_error_reason("send_data", client_sockets[i]);
-					close(client_sockets[i]);
-					client_sockets[i]=-1;
-				}
-			}
-		}
-        */
-	}
+        memset(databuff, 0, PKTSIZE * sizeof(char));
+        memcpy(databuff, nmea_sentence, strlen(nmea_sentence));
 
-	free(databuff);
-	vTaskDelete(NULL);
+        for (int i=0; i<LARK_MAX_STA_CONN; i++) {
+            if (client_sockets[i] >= 0) {
+                int len = send(client_sockets[i], databuff, strlen(databuff), 0);
+                if (len <= 0) {
+                    int err = get_socket_error_code(client_sockets[i]);
+                    if (err != ENOMEM)
+                        show_socket_error_reason("send_data", client_sockets[i]);
+                    close(client_sockets[i]);
+                    client_sockets[i]=-1;
+                }
+            }
+        }
+    }
+
+    free(databuff);
+    vTaskDelete(NULL);
 }
 
 static void net_rx_task(void *pvParameters) {

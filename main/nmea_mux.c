@@ -34,18 +34,19 @@
 
 #define STACK_SIZE 4096
 
+char nmea_sentence[256];
+
 static void nmea_mux_task(void *pvParameter) {
 	/* run main loop */
 	while(1) {
 		if (xSemaphoreTake(sensor_event_semaphore, portMAX_DELAY)!= pdTRUE) {}
             //ESP_LOGW(TAG, "semaphore failed!\n");
 
-        char sentence[256];
         extern sensor_event_t sensor_event;
         if(sensor_event.type == EV_Pstat)
         {
-                POV_sentence_float(sentence, 'P', sensor_event.value);
-                printf("%s\n", sentence);
+            POV_sentence_float(nmea_sentence, 'P', sensor_event.value);
+            xSemaphoreGive(net_feed_semaphore);
         }
     }
 }

@@ -180,7 +180,6 @@ static void sensor_read_task(void *pvParameter) {
                 // publish the filtered value
                 sensor_event.type = EV_Pstat;
                 sensor_event.value = p1_hPa;
-                printf("give\n");
                 xSemaphoreGive(sensor_event_semaphore);
             }
         }

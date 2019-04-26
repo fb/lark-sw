@@ -31,6 +31,7 @@
 #include "esp_err.h"
 
 #include "semaphores.h"
+#include "filter.h"
 #include "ms5611.h"
 #include "sensor.h"
 #include "vario.h" // vario_feed
@@ -141,6 +142,9 @@ bool sensor_valid(sensor_t * sensor)
 
 static void sensor_read_task(void *pvParameter) {
 	/* run main loop */
+	static exp_filter_t p1_filter;
+	exp_filter_init(&p1_filter, 0.8);
+
 	while(1) {
         static sensor_t sensor1 =
         {
@@ -170,14 +174,11 @@ static void sensor_read_task(void *pvParameter) {
 
         /* filter sensor data */
 
-        static float p1_hPa = 1013.0f;
         static int p1_count = 0;
         if(new_s1 == true && sensor_valid(&sensor1)) // new p1 data available
-        {
-            /* exponential smoothing */
-            float p = sensor1.value;
-            const float alpha = .8;
-            p1_hPa = alpha * p1_hPa  + (1 - alpha) * p;
+	{
+	    /* exponential smoothing */
+	    exp_filter_feed(&p1_filter, sensor1.value);
             p1_count--;
             if(p1_count <= 0)
             {
@@ -185,7 +186,7 @@ static void sensor_read_task(void *pvParameter) {
 
                 // publish the filtered value
                 sensor_event.type = EV_Pstat;
-                sensor_event.value = p1_hPa;
+                sensor_event.value = exp_filter_get(&p1_filter);
                 xSemaphoreGive(sensor_event_semaphore);
             }
         }

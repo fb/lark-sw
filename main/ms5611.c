@@ -13,7 +13,6 @@
 #include "ms5611.h"
 
 #include "esp_i2c.h"
-#include "esp_delay.h"
 
 #include <stdio.h>
 
@@ -21,19 +20,10 @@
 extern "C" {
 #endif
 
-/*
-   [TYPE_MS5525DS001] = {
-   .Q1 = 15,
-   .Q2 = 17,
-   .Q3 = 7,
-   .Q4 = 5,
-   .Q5 = 7,
-   .Q6 = 21,
-   },
-*/
-
-// Q (powers of 2) for MS5611. (see MS5525 datasheet)
-static uint8_t Q[7] = {
+// Q exponents (see MS5525/MS5611 datasheet)
+// leaving Q[0] empty allows using same indices as datasheet
+// MS5611
+static uint8_t Q_MS5611[7] = {
     [1] = 15,
     [2] = 16,
     [3] = 8,
@@ -42,15 +32,28 @@ static uint8_t Q[7] = {
     [6] = 23,
 };
 
-int32_t calculate_dT(uint32_t D2, uint16_t * C)
+// MS5525
+static uint8_t Q_MS5525[7] =
+{
+   [1] = 15,
+   [2] = 17,
+   [3] = 7,
+   [4] = 5,
+   [5] = 7,
+   [6] = 21,
+};
+
+int32_t calculate_dT(uint32_t D2, uint16_t * C, uint8_t * Q)
 {
     // dT = D2 - C5 * 2**Q5
     int32_t dT = - (C[5] << Q[5]);
     return dT + D2;
 }
 
-int64_t calculate_P_noshift(uint32_t D1, int32_t dT, uint16_t * C)
+int64_t calculate_P_noshift(uint32_t D1, uint32_t D2, uint16_t * C, uint8_t * Q)
 {
+    uint32_t dT =  calculate_dT(D2, C, Q);
+
     // OFF = C2 * 2**Q2 + (C4 * dT) / 2**Q4
     int64_t OFF = (int64_t)C[2] << 16;
     OFF += (C[4] * dT) >> 7;
@@ -65,14 +68,14 @@ int64_t calculate_P_noshift(uint32_t D1, int32_t dT, uint16_t * C)
     return P;
 }
 
-uint32_t calculate_P(uint32_t D1, int32_t dT, uint16_t * C)
+uint32_t calculate_P(uint32_t D1, uint32_t D2, uint16_t * C, uint8_t * Q)
 {
-    return calculate_P_noshift(D1, dT, C) >> 15;
+    return calculate_P_noshift(D1, D2, C, Q) >> 15;
 }
 
-float calculate_P_float(uint32_t D1, int32_t dT, uint16_t *C)
+float calculate_P_float(uint32_t D1, uint32_t D2, uint16_t * C, uint8_t * Q)
 {
-    return calculate_P_noshift(D1, dT, C) * (0.01 / (1 << 15));
+    return calculate_P_noshift(D1, D2, C, Q) * (0.01 / (1 << 15));
 }
 
 /**
@@ -109,6 +112,90 @@ bool ms5611_crc_check (uint16_t *n_prom)
     n_rem ^= 0x00;
         
 	return  ( n_rem == (n_prom[7] & 0x000F) );
+}
+
+enum ms_addr
+{
+    MS_ADDR_76 = 0x76,
+    MS_ADDR_77 = 0x77,
+};
+
+enum ms_cmd
+{
+    MS_CMD_RESET        = 0x1E,
+    MS_CMD_READ_ADC     = 0x00,
+    MS_CMD_CONVERT_D1   = 0x48,
+    MS_CMD_CONVERT_D2   = 0x58,
+    MS_CMD_READ_PROM_A0 = 0xA0,
+};
+
+static uint32_t read_adc()
+{
+    i2c_write_byte(MS_ADDR_76, MS_CMD_READ_ADC);
+    uint8_t buf[3];
+    i2c_read_bytes(MS_ADDR_76, 3, buf);
+    return buf[2] | buf[1] << 8 | buf[0] << 16;
+}
+
+static void read_coeffs(uint16_t C[8])
+{
+    for(int i = 0; i < 8; i++)
+    {
+        uint8_t buf[2];
+        i2c_write_byte(MS_ADDR_76, MS_CMD_READ_PROM_A0 + 2*i);
+        i2c_read_bytes(MS_ADDR_76, 2, buf);
+
+        C[i] = buf[1] | (buf[0] << 8);
+
+    }
+}
+
+void sensor_init(sensor_t * sensor)
+{
+    if(sensor->type == MS_TYPE_DIFF)
+	sensor->Q = Q_MS5525;
+    else
+	sensor->Q = Q_MS5611;
+
+    sensor->state = INIT;
+}
+
+// Sensor FSM
+bool sensor_run(sensor_t * sensor)
+{
+    i2c_write_byte(0x70, 4 + sensor->channel); // activate my channel on MUX
+
+    switch(sensor->state)
+    {
+        case INIT:
+            read_coeffs(sensor->C);
+            printf("# CRC check: %d\n", ms5611_crc_check(sensor->C) == true);
+            sensor->state = POLL_D1;
+        case POLL_D2:
+            sensor->D1 = read_adc();
+            i2c_write_byte(MS_ADDR_76, MS_CMD_CONVERT_D2); // temperature @ OSR 4096
+            int32_t P = calculate_P(sensor->D1, sensor->D2, sensor->C, sensor->Q);
+            //printf("%d %u %u %d %d\n", sensor->channel, sensor->D1, sensor->D2, dT, P);
+            printf("%d %d\n", sensor->channel, P);
+            sensor->state = POLL_D1;
+            sensor->value = P / 100.0f;
+            return true;
+            break;
+        case POLL_D1:
+            sensor->D2 = read_adc();
+            i2c_write_byte(MS_ADDR_76, MS_CMD_CONVERT_D1); // pressure @ OSR 4096
+            sensor->state = POLL_D2;
+            break;
+        default:
+            printf("FSM error\n");
+    }
+
+    return false;
+}
+
+bool sensor_valid(sensor_t * sensor)
+{
+    return sensor->value > 200 && sensor->value < 1200;
 }
 
 #ifdef __cplusplus
